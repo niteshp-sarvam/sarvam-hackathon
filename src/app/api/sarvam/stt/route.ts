@@ -11,7 +11,8 @@ export async function POST(req: NextRequest) {
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
       const file = formData.get("file") as File | null;
-      languageCode = (formData.get("language_code") as string) ?? "hi-IN";
+      languageCode = formData.get("language_code") as string;
+      if (!languageCode) throw new Error("language_code is required");
       if (!file) throw new Error("No audio file provided");
       audioBuffer = Buffer.from(await file.arrayBuffer());
       filename = file.name || "audio.webm";
@@ -19,7 +20,8 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       if (!body.audio) throw new Error("No audio data provided");
       audioBuffer = Buffer.from(body.audio, "base64");
-      languageCode = body.language_code ?? "hi-IN";
+      languageCode = body.language_code;
+      if (!languageCode) throw new Error("language_code is required");
     }
 
     const result = await speechToText(audioBuffer, languageCode, filename);

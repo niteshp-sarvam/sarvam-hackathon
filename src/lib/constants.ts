@@ -1,12 +1,12 @@
 export const SUPPORTED_LANGUAGES = [
-  { code: "hi", name: "Hindi", nativeName: "हिन्दी", speakers: "528M" },
-  { code: "ta", name: "Tamil", nativeName: "தமிழ்", speakers: "75M" },
-  { code: "te", name: "Telugu", nativeName: "తెలుగు", speakers: "83M" },
-  { code: "kn", name: "Kannada", nativeName: "ಕನ್ನಡ", speakers: "44M" },
-  { code: "bn", name: "Bengali", nativeName: "বাংলা", speakers: "97M" },
-  { code: "mr", name: "Marathi", nativeName: "मराठी", speakers: "83M" },
-  { code: "ml", name: "Malayalam", nativeName: "മലയാളം", speakers: "35M" },
-  { code: "gu", name: "Gujarati", nativeName: "ગુજરાતી", speakers: "55M" },
+  { code: "hi", name: "Hindi", nativeName: "हिन्दी", script: "Devanagari", speakers: "528M" },
+  { code: "ta", name: "Tamil", nativeName: "தமிழ்", script: "Tamil", speakers: "75M" },
+  { code: "te", name: "Telugu", nativeName: "తెలుగు", script: "Telugu", speakers: "83M" },
+  { code: "kn", name: "Kannada", nativeName: "ಕನ್ನಡ", script: "Kannada", speakers: "44M" },
+  { code: "bn", name: "Bengali", nativeName: "বাংলা", script: "Bengali", speakers: "97M" },
+  { code: "mr", name: "Marathi", nativeName: "मराठी", script: "Devanagari", speakers: "83M" },
+  { code: "ml", name: "Malayalam", nativeName: "മലയാളം", script: "Malayalam", speakers: "35M" },
+  { code: "gu", name: "Gujarati", nativeName: "ગુજરાતી", script: "Gujarati", speakers: "55M" },
 ] as const;
 
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]["code"];
@@ -20,7 +20,7 @@ export const IDENTITY_LEVELS = [
 
 export interface ScenarioPromptConfig {
   maxTurns: number;
-  englishTolerance: "high" | "medium" | "low";
+  nativeTolerance: "high" | "medium" | "low";
   formality: "casual" | "polite" | "formal";
   characterQuirks?: string;
   openingStyle?: string;
@@ -38,7 +38,7 @@ export const SCENARIO_ROOMS = [
     setting: "T. Nagar Ranganathan Street morning market",
     promptConfig: {
       maxTurns: 8,
-      englishTolerance: "high",
+      nativeTolerance: "high",
       formality: "casual",
       characterQuirks: "Throws in random vegetables you didn't ask for. Uses exaggerated prices first. Occasionally compliments the learner to soften them up.",
       openingStyle: "Shout out your best deals to attract the customer",
@@ -55,7 +55,7 @@ export const SCENARIO_ROOMS = [
     setting: "Majestic bus stand, rush hour",
     promptConfig: {
       maxTurns: 8,
-      englishTolerance: "high",
+      nativeTolerance: "high",
       formality: "casual",
       characterQuirks: "Keeps citing traffic and petrol prices. Sighs dramatically. Eventually warms up if the learner is persistent.",
     } as ScenarioPromptConfig,
@@ -71,7 +71,7 @@ export const SCENARIO_ROOMS = [
     setting: "Local dabba service office in Dadar",
     promptConfig: {
       maxTurns: 10,
-      englishTolerance: "medium",
+      nativeTolerance: "medium",
       formality: "polite",
       characterQuirks: "Speaks rapidly and uses lots of Marathi food terms. Asks clarifying questions. Very businesslike but warm once order is confirmed.",
     } as ScenarioPromptConfig,
@@ -87,7 +87,7 @@ export const SCENARIO_ROOMS = [
     setting: "South Kolkata during Durga Puja festivities",
     promptConfig: {
       maxTurns: 12,
-      englishTolerance: "medium",
+      nativeTolerance: "medium",
       formality: "polite",
       characterQuirks: "Tells little stories about each pandal. Uses Bengali cultural references freely. Occasionally gets sidetracked reminiscing about past Pujas.",
     } as ScenarioPromptConfig,
@@ -103,7 +103,7 @@ export const SCENARIO_ROOMS = [
     setting: "Paradise Restaurant, Secunderabad",
     promptConfig: {
       maxTurns: 8,
-      englishTolerance: "high",
+      nativeTolerance: "high",
       formality: "casual",
       characterQuirks: "Recommends the special biryani constantly. Speaks quickly. Asks 'spicy or less spicy?' multiple times.",
     } as ScenarioPromptConfig,
@@ -119,7 +119,7 @@ export const SCENARIO_ROOMS = [
     setting: "Famous chai stall near Law Garden",
     promptConfig: {
       maxTurns: 8,
-      englishTolerance: "high",
+      nativeTolerance: "high",
       formality: "casual",
       characterQuirks: "Very talkative, asks about your day. Proudly describes each snack. Offers free samples of the day's special.",
     } as ScenarioPromptConfig,
@@ -135,7 +135,7 @@ export const SCENARIO_ROOMS = [
     setting: "Rajiv Chowk Metro station during evening rush",
     promptConfig: {
       maxTurns: 8,
-      englishTolerance: "high",
+      nativeTolerance: "high",
       formality: "casual",
       characterQuirks: "Gives helpful tips about which coach to stand in. Warns about pickpockets. Mentions metro card recharge.",
     } as ScenarioPromptConfig,
@@ -151,7 +151,7 @@ export const SCENARIO_ROOMS = [
     setting: "A 300-year-old haveli in the walled city of Jaipur",
     promptConfig: {
       maxTurns: 12,
-      englishTolerance: "low",
+      nativeTolerance: "low",
       formality: "formal",
       characterQuirks: "Uses Urdu-Hindi literary phrases. Quotes poetry. Expects respectful address. Gets animated about architecture details.",
       openingStyle: "Welcome the visitor with a formal, poetic greeting about the haveli's heritage",
@@ -168,7 +168,7 @@ export const SCENARIO_ROOMS = [
     setting: "Alleppey backwater jetty, morning",
     promptConfig: {
       maxTurns: 10,
-      englishTolerance: "low",
+      nativeTolerance: "low",
       formality: "polite",
       characterQuirks: "Describes the food in loving detail. Mentions the sunset views. Tries to upsell the premium boat with AC.",
     } as ScenarioPromptConfig,
@@ -184,7 +184,7 @@ export const SCENARIO_ROOMS = [
     setting: "Dashashwamedh Ghat during evening Ganga Aarti",
     promptConfig: {
       maxTurns: 12,
-      englishTolerance: "low",
+      nativeTolerance: "low",
       formality: "formal",
       characterQuirks: "Uses Sanskrit shlokas naturally. Explains spiritual significance with reverence. Occasionally tests the learner's understanding with questions.",
       openingStyle: "Begin with a spiritual greeting appropriate for the sacred setting",

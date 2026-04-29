@@ -901,5 +901,205 @@ export function HintCard({
   );
 }
 
+// --------------- ShimmerBorder ---------------
+export function ShimmerBorder({
+  children,
+  className,
+  style,
+  borderRadius = 20,
+}: {
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+  borderRadius?: number;
+}) {
+  return (
+    <div
+      className={`shimmer-border ${className ?? ""}`}
+      style={{
+        position: "relative",
+        borderRadius,
+        padding: 2,
+        ...style,
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          borderRadius: borderRadius - 1,
+          overflow: "hidden",
+          zIndex: 1,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// --------------- CountUpRing ---------------
+export function CountUpRing({
+  percent,
+  size = 56,
+  strokeWidth = 4.5,
+  color = "#58CC02",
+  bgColor,
+  delay = 0.3,
+  children,
+  style,
+}: {
+  percent: number;
+  size?: number;
+  strokeWidth?: number;
+  color?: string;
+  bgColor?: string;
+  delay?: number;
+  children?: ReactNode;
+  style?: CSSProperties;
+}) {
+  const r = (size - strokeWidth) / 2;
+  const circ = 2 * Math.PI * r;
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0, ...style }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)" }}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={bgColor ?? "var(--tatva-border-secondary, #333)"}
+          strokeWidth={strokeWidth}
+        />
+        <motion.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          initial={{ strokeDasharray: `0 ${circ}` }}
+          animate={{ strokeDasharray: `${(percent / 100) * circ} ${circ}` }}
+          transition={{ duration: 1, delay, ease: "easeOut" }}
+        />
+      </svg>
+      {children && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --------------- GlowPulse ---------------
+export function GlowPulse({
+  children,
+  color = "rgba(88, 204, 2, 0.25)",
+  active = true,
+  className,
+  style,
+}: {
+  children: ReactNode;
+  color?: string;
+  active?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <div style={{ position: "relative", display: "inline-flex", ...style }} className={className}>
+      {active && (
+        <motion.div
+          animate={{
+            opacity: [0.4, 0.8, 0.4],
+            scale: [0.92, 1.08, 0.92],
+          }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+          style={{
+            position: "absolute",
+            inset: -6,
+            borderRadius: "50%",
+            background: `radial-gradient(circle, ${color} 0%, transparent 70%)`,
+            pointerEvents: "none",
+            zIndex: 0,
+          }}
+        />
+      )}
+      <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
+    </div>
+  );
+}
+
+// --------------- Wiggle ---------------
+export function Wiggle({
+  children,
+  active = true,
+  className,
+  style,
+}: {
+  children: ReactNode;
+  active?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <motion.div
+      animate={
+        active
+          ? { rotate: [0, -3, 3, -2, 2, 0] }
+          : { rotate: 0 }
+      }
+      transition={
+        active
+          ? { duration: 0.5, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" }
+          : { duration: 0.2 }
+      }
+      className={className}
+      style={style}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// --------------- SlideUpReveal ---------------
+export function SlideUpReveal({
+  children,
+  className,
+  style,
+}: {
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setInView(true); },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ opacity: 0, y: 30 }}
+      animate={inView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
+      transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
+      className={className}
+      style={style}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 // --------------- AnimatePresence re-export ---------------
 export { AnimatePresence, motion };

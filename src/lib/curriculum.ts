@@ -5,6 +5,9 @@ export interface VocabSeed {
   word: string;
   translation: string;
   category: FSRSCard["category"];
+  /** Native script form (Devanagari, Tamil, etc). When omitted the UI fetches
+   *  it lazily via the transliterate API and caches the result. */
+  nativeText?: string;
 }
 
 export interface Lesson {
@@ -101,46 +104,46 @@ const VOCAB_BANK: Record<string, Record<string, VocabSeed[]>> = {
   },
   hi: {
     greetings: [
-      { word: "namaste", translation: "hello / greeting", category: "vocabulary" },
-      { word: "dhanyavaad", translation: "thank you", category: "vocabulary" },
-      { word: "aap kaise hain", translation: "how are you", category: "grammar" },
-      { word: "theek hai", translation: "okay / alright", category: "vocabulary" },
-      { word: "phir milenge", translation: "see you again", category: "grammar" },
+      { word: "namaste", nativeText: "नमस्ते", translation: "hello / greeting", category: "vocabulary" },
+      { word: "dhanyavaad", nativeText: "धन्यवाद", translation: "thank you", category: "vocabulary" },
+      { word: "aap kaise hain", nativeText: "आप कैसे हैं", translation: "how are you", category: "grammar" },
+      { word: "theek hai", nativeText: "ठीक है", translation: "okay / alright", category: "vocabulary" },
+      { word: "phir milenge", nativeText: "फिर मिलेंगे", translation: "see you again", category: "grammar" },
     ],
     market: [
-      { word: "kitna hai", translation: "how much is it", category: "vocabulary" },
-      { word: "thoda", translation: "a little", category: "vocabulary" },
-      { word: "bahut", translation: "very much", category: "vocabulary" },
-      { word: "daam kam karo", translation: "reduce the price", category: "grammar" },
-      { word: "mujhe nahi chahiye", translation: "I don't need it", category: "grammar" },
+      { word: "kitna hai", nativeText: "कितना है", translation: "how much is it", category: "vocabulary" },
+      { word: "thoda", nativeText: "थोड़ा", translation: "a little", category: "vocabulary" },
+      { word: "bahut", nativeText: "बहुत", translation: "very much", category: "vocabulary" },
+      { word: "daam kam karo", nativeText: "दाम कम करो", translation: "reduce the price", category: "grammar" },
+      { word: "mujhe nahi chahiye", nativeText: "मुझे नहीं चाहिए", translation: "I don't need it", category: "grammar" },
     ],
     directions: [
-      { word: "kidhar", translation: "where", category: "vocabulary" },
-      { word: "daayein", translation: "right", category: "vocabulary" },
-      { word: "baayein", translation: "left", category: "vocabulary" },
-      { word: "seedha", translation: "straight", category: "vocabulary" },
-      { word: "kitni door", translation: "how far", category: "grammar" },
+      { word: "kidhar", nativeText: "किधर", translation: "where", category: "vocabulary" },
+      { word: "daayein", nativeText: "दाएं", translation: "right", category: "vocabulary" },
+      { word: "baayein", nativeText: "बाएं", translation: "left", category: "vocabulary" },
+      { word: "seedha", nativeText: "सीधा", translation: "straight", category: "vocabulary" },
+      { word: "kitni door", nativeText: "कितनी दूर", translation: "how far", category: "grammar" },
     ],
     food: [
-      { word: "khaana", translation: "food / meal", category: "vocabulary" },
-      { word: "paani", translation: "water", category: "vocabulary" },
-      { word: "teekha", translation: "spicy", category: "vocabulary" },
-      { word: "kha liya", translation: "done eating", category: "grammar" },
-      { word: "ek plate", translation: "one plate", category: "vocabulary" },
+      { word: "khaana", nativeText: "खाना", translation: "food / meal", category: "vocabulary" },
+      { word: "paani", nativeText: "पानी", translation: "water", category: "vocabulary" },
+      { word: "teekha", nativeText: "तीखा", translation: "spicy", category: "vocabulary" },
+      { word: "kha liya", nativeText: "खा लिया", translation: "done eating", category: "grammar" },
+      { word: "ek plate", nativeText: "एक प्लेट", translation: "one plate", category: "vocabulary" },
     ],
     people: [
-      { word: "maa", translation: "mother", category: "vocabulary" },
-      { word: "pitaji", translation: "father", category: "vocabulary" },
-      { word: "bhaiya", translation: "elder brother", category: "vocabulary" },
-      { word: "didi", translation: "elder sister", category: "vocabulary" },
-      { word: "dost", translation: "friend", category: "vocabulary" },
+      { word: "maa", nativeText: "माँ", translation: "mother", category: "vocabulary" },
+      { word: "pitaji", nativeText: "पिताजी", translation: "father", category: "vocabulary" },
+      { word: "bhaiya", nativeText: "भैया", translation: "elder brother", category: "vocabulary" },
+      { word: "didi", nativeText: "दीदी", translation: "elder sister", category: "vocabulary" },
+      { word: "dost", nativeText: "दोस्त", translation: "friend", category: "vocabulary" },
     ],
     culture: [
-      { word: "mandir", translation: "temple", category: "vocabulary" },
-      { word: "diwali", translation: "festival of lights", category: "vocabulary" },
-      { word: "rangoli", translation: "floor art", category: "vocabulary" },
-      { word: "mehendi", translation: "henna art", category: "vocabulary" },
-      { word: "tyohaar", translation: "festival", category: "vocabulary" },
+      { word: "mandir", nativeText: "मंदिर", translation: "temple", category: "vocabulary" },
+      { word: "diwali", nativeText: "दिवाली", translation: "festival of lights", category: "vocabulary" },
+      { word: "rangoli", nativeText: "रंगोली", translation: "floor art", category: "vocabulary" },
+      { word: "mehendi", nativeText: "मेहंदी", translation: "henna art", category: "vocabulary" },
+      { word: "tyohaar", nativeText: "त्योहार", translation: "festival", category: "vocabulary" },
     ],
   },
   kn: {
@@ -410,7 +413,7 @@ const VOCAB_BANK: Record<string, Record<string, VocabSeed[]>> = {
 };
 
 function getVocab(lang: string, topic: string): VocabSeed[] {
-  return VOCAB_BANK[lang]?.[topic] ?? VOCAB_BANK["hi"]?.[topic] ?? [];
+  return VOCAB_BANK[lang]?.[topic] ?? [];
 }
 
 function buildUnits(lang: LanguageCode): Unit[] {

@@ -3,15 +3,26 @@
 import { usePathname, useRouter } from "next/navigation";
 import { Box, Sidebar, SidebarProvider } from "@sarvam/tatva";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { signOut } from "next-auth/react";
 import { useAppStore } from "@/lib/store";
+import { useTheme } from "@/lib/theme";
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const identity = useAppStore((s) => s.identity);
+  const { resolvedMode, toggle: toggleTheme } = useTheme();
+  const [defaultSidebarOpen, setDefaultSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setDefaultSidebarOpen(window.innerWidth >= 768);
+    }
+  }, []);
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen={defaultSidebarOpen}>
       <div className="flex h-svh overflow-hidden bg-tatva-surface-primary">
         <Sidebar
           header={{
@@ -26,7 +37,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               items: [
                 {
                   label: "Learning Path",
-                  icon: "route",
+                  icon: "shuffle",
                   href: "/learning-path",
                 },
                 {
@@ -59,11 +70,27 @@ export default function AppShell({ children }: { children: ReactNode }) {
             },
           ]}
           footerMenuItems={[
+            {
+              label: resolvedMode === "dark" ? "Light mode" : "Dark mode",
+              icon: resolvedMode === "dark" ? "eye" : "eye-off",
+              onClick: toggleTheme,
+            },
             { label: "Settings", icon: "settings", href: "/settings" },
           ]}
           profile={{
             name: identity?.name || "Learner",
-            onProfileClick: () => router.push("/settings"),
+            actions: [
+              {
+                label: "Settings",
+                icon: "settings",
+                onClick: () => router.push("/settings"),
+              },
+              {
+                label: "Sign out",
+                icon: "external-link",
+                onClick: () => signOut({ callbackUrl: "/login" }),
+              },
+            ],
           }}
           activePath={pathname}
         />

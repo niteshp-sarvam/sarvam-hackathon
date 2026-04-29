@@ -9,6 +9,7 @@ import {
   Icon,
   Text,
   Badge,
+  Skeleton,
   Tabs,
 } from "@sarvam/tatva";
 import { useAppStore } from "@/lib/store";
@@ -31,20 +32,21 @@ import {
   AnimatePresence,
   motion,
 } from "@/components/motion";
+import { GAME_COLORS, GAME_GRADIENTS, SURFACE_VARS } from "@/lib/theme-tokens";
 
 type IconName = Parameters<typeof Icon>[0]["name"];
 
 const TYPE_CONFIG: Record<string, { icon: IconName; label: string; gradient: string }> = {
-  vocab: { icon: "docs", label: "Vocabulary", gradient: "linear-gradient(135deg, #58CC02, #46A302)" },
-  listen: { icon: "audio-book", label: "Listening", gradient: "linear-gradient(135deg, #1CB0F6, #0899DB)" },
-  speak: { icon: "microphone", label: "Speaking", gradient: "linear-gradient(135deg, #FF9600, #E68600)" },
-  scenario: { icon: "chat", label: "Scenario", gradient: "linear-gradient(135deg, #CE82FF, #A855F7)" },
+  vocab: { icon: "docs", label: "Vocabulary", gradient: GAME_GRADIENTS.success },
+  listen: { icon: "audio-book", label: "Listening", gradient: GAME_GRADIENTS.info },
+  speak: { icon: "microphone", label: "Speaking", gradient: GAME_GRADIENTS.speak },
+  scenario: { icon: "chat", label: "Scenario", gradient: GAME_GRADIENTS.scenario },
 };
 
 const DIFFICULTY_COLOR: Record<string, string> = {
-  beginner: "#58CC02",
-  intermediate: "#FFC200",
-  advanced: "#FF4B4B",
+  beginner: GAME_COLORS.success,
+  intermediate: GAME_COLORS.warningAlt,
+  advanced: GAME_COLORS.danger,
 };
 
 export default function LearningPathPage() {
@@ -121,7 +123,20 @@ export default function LearningPathPage() {
     if (mounted) checkMilestones();
   }, [mounted, checkMilestones]);
 
-  if (!isOnboarded || !identity || !targetLanguage || !mounted) return null;
+  if (!isOnboarded || !identity || !targetLanguage || !mounted) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        <Header type="main" left={{ title: "Learning Path" }} />
+        <Box display="flex" direction="column" gap={6} p={6}>
+          <Skeleton height={40} width="60%" />
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+          <Skeleton height={80} />
+        </Box>
+      </div>
+    );
+  }
 
   const langInfo = SUPPORTED_LANGUAGES.find((l) => l.code === targetLanguage);
   const currentLevel = IDENTITY_LEVELS.findLast((l) => identity.xp >= l.minXp);
@@ -174,8 +189,8 @@ export default function LearningPathPage() {
               bottom: -8,
               width: 2,
               background: isCompleted
-                ? "#58CC02"
-                : "var(--tatva-border-secondary, #E5E5E5)",
+                ? GAME_COLORS.success
+                : SURFACE_VARS.borderSecondary,
             }}
           />
         )}
@@ -195,13 +210,13 @@ export default function LearningPathPage() {
             background: isCompleted
               ? config.gradient
               : isAvailable
-              ? "var(--tatva-surface-secondary, #fff)"
-              : "var(--tatva-background-tertiary, #F3F3F3)",
+              ? SURFACE_VARS.surfaceSecondary
+              : SURFACE_VARS.backgroundTertiary,
             border: isAvailable
               ? `2px solid ${DIFFICULTY_COLOR[lesson.type === "scenario" ? "advanced" : "beginner"]}`
               : isCompleted
               ? "none"
-              : "2px solid var(--tatva-border-secondary, #E5E5E5)",
+              : `2px solid ${SURFACE_VARS.borderSecondary}`,
             boxShadow: isAvailable
               ? "0 0 0 4px rgba(88, 204, 2, 0.15)"
               : undefined,
@@ -291,11 +306,34 @@ export default function LearningPathPage() {
                 )}
               </Box>
               {isCompleted ? (
-                <Text variant="body-xs" tone="positive">
-                  Completed {lessonProgress[lesson.id]?.completedAt
-                    ? new Date(lessonProgress[lesson.id].completedAt!).toLocaleDateString()
-                    : ""}
-                </Text>
+                <>
+                  <Text variant="body-xs" tone="positive">
+                    Completed {lessonProgress[lesson.id]?.completedAt
+                      ? new Date(lessonProgress[lesson.id].completedAt!).toLocaleDateString()
+                      : ""}
+                  </Text>
+                  {lesson.type === "scenario" && lesson.linkedScenarioId ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        router.push(`/scenario-rooms/${lesson.linkedScenarioId}`)
+                      }
+                    >
+                      Practice Again
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        router.push(`/learning-path/lesson/${lesson.id}`)
+                      }
+                    >
+                      Practice Again
+                    </Button>
+                  )}
+                </>
               ) : lesson.type === "scenario" && lesson.linkedScenarioId ? (
                 <Button
                   size="sm"
@@ -330,7 +368,7 @@ export default function LearningPathPage() {
   function renderUnit(unit: Unit, unitIndex: number) {
     const progress = getUnitProgress(unit, lessonProgress);
     const done = isUnitCompleted(unit, lessonProgress);
-    const diffColor = DIFFICULTY_COLOR[unit.difficulty] ?? "#58CC02";
+    const diffColor = DIFFICULTY_COLOR[unit.difficulty] ?? GAME_COLORS.success;
 
     return (
       <div key={unit.id}>
@@ -344,7 +382,7 @@ export default function LearningPathPage() {
           gap={4}
           mb={2}
           style={{
-            borderLeft: `4px solid ${done ? "#58CC02" : diffColor}`,
+            borderLeft: `4px solid ${done ? GAME_COLORS.success : diffColor}`,
           }}
         >
           <div
@@ -353,7 +391,7 @@ export default function LearningPathPage() {
               height: 52,
               borderRadius: 16,
               background: done
-                ? "linear-gradient(135deg, #58CC02, #46A302)"
+                ? GAME_GRADIENTS.success
                 : `linear-gradient(135deg, ${diffColor}22, ${diffColor}11)`,
               display: "flex",
               alignItems: "center",
@@ -386,7 +424,10 @@ export default function LearningPathPage() {
                     : "red"
                 }
               >
-                {done ? "Complete" : unit.difficulty}
+                {done
+                  ? "Complete"
+                  : unit.difficulty.charAt(0).toUpperCase() +
+                    unit.difficulty.slice(1)}
               </Badge>
             </Box>
             <Text variant="body-xs" tone="secondary">
@@ -403,7 +444,7 @@ export default function LearningPathPage() {
                   height: "100%",
                   width: `${progress.percent}%`,
                   borderRadius: 9999,
-                  background: done ? "#58CC02" : diffColor,
+                  background: done ? GAME_COLORS.success : diffColor,
                   transition: "width 0.5s ease",
                 }}
               />
@@ -455,10 +496,10 @@ export default function LearningPathPage() {
           {/* Progress ring */}
           <div style={{ position: "relative", width: 72, height: 72, flexShrink: 0 }}>
             <svg width="72" height="72" viewBox="0 0 72 72" style={{ transform: "rotate(-90deg)" }}>
-              <circle cx="36" cy="36" r="30" fill="none" stroke="var(--tatva-border-secondary, #E5E5E5)" strokeWidth="6" />
+              <circle cx="36" cy="36" r="30" fill="none" stroke={SURFACE_VARS.borderSecondary} strokeWidth="6" />
               <circle
                 cx="36" cy="36" r="30" fill="none"
-                stroke="#58CC02" strokeWidth="6"
+                stroke={GAME_COLORS.success} strokeWidth="6"
                 strokeLinecap="round"
                 strokeDasharray={`${overallPercent * 1.885} 188.5`}
                 style={{ transition: "stroke-dasharray 1s ease" }}
@@ -542,7 +583,7 @@ export default function LearningPathPage() {
                       align="center"
                       gap={4}
                       style={{
-                        borderLeft: "4px solid #58CC02",
+                        borderLeft: `4px solid ${GAME_COLORS.success}`,
                       }}
                     >
                       <div
@@ -550,7 +591,7 @@ export default function LearningPathPage() {
                           width: 44,
                           height: 44,
                           borderRadius: 12,
-                          background: "linear-gradient(135deg, #58CC0222, #58CC0211)",
+                          background: `linear-gradient(135deg, ${GAME_COLORS.success}22, ${GAME_COLORS.success}11)`,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -597,7 +638,7 @@ export default function LearningPathPage() {
                           width: 44,
                           height: 44,
                           borderRadius: 12,
-                          background: "var(--tatva-background-tertiary, #F3F3F3)",
+                          background: SURFACE_VARS.backgroundTertiary,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",

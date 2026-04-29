@@ -6,6 +6,9 @@
 export interface FSRSCard {
   id: string;
   word: string;
+  /** Native script form (Devanagari, Tamil, etc). Optional — when missing the
+   *  UI fetches it lazily via the transliterate API and caches the result. */
+  nativeText?: string;
   translation: string;
   language: string;
   category: "pronunciation" | "grammar" | "vocabulary" | "comprehension";
@@ -161,11 +164,13 @@ export function createCard(
   word: string,
   translation: string,
   language: string,
-  category: FSRSCard["category"]
+  category: FSRSCard["category"],
+  nativeText?: string
 ): FSRSCard {
   return {
     id: `${language}-${word}-${Date.now()}`,
     word,
+    nativeText,
     translation,
     language,
     category,

@@ -29,7 +29,12 @@ console.log(`[voice-server] Listening on ws://localhost:${PORT}`);
 wss.on("connection", (socket, req) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const roomId = url.searchParams.get("roomId") ?? "unknown";
-  const langCode = url.searchParams.get("lang") ?? "hi-IN";
+  const langCode = url.searchParams.get("lang");
+  if (!langCode) {
+    console.error(`[voice-server] Missing required 'lang' query param`);
+    socket.close(4001, "Missing lang param");
+    return;
+  }
   const systemPrompt = url.searchParams.get("systemPrompt") ?? "";
 
   console.log(`[voice-server] New connection: room=${roomId}, lang=${langCode}`);

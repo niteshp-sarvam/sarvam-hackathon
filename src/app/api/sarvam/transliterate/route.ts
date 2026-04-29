@@ -10,10 +10,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No input provided" }, { status: 400 });
     }
 
+    if (!source_language_code || !target_language_code) {
+      return NextResponse.json(
+        { error: "source_language_code and target_language_code are required" },
+        { status: 400 }
+      );
+    }
+
     const result = await transliterate(
       input,
-      source_language_code ?? "hi-IN",
-      target_language_code ?? "en-IN"
+      source_language_code,
+      target_language_code
     );
 
     return NextResponse.json(result);

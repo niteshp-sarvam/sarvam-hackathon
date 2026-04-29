@@ -85,17 +85,20 @@ export async function translateText(
 export async function textToSpeech(
   input: string,
   targetLang: string,
-  options?: { speaker?: string; model?: string }
+  options?: { speaker?: string; model?: string; pace?: number }
 ) {
+  const body: Record<string, unknown> = {
+    text: input,
+    target_language_code: targetLang,
+    speaker: options?.speaker ?? "shubh",
+    model: options?.model ?? "bulbul:v3",
+  };
+  if (options?.pace !== undefined) body.pace = options.pace;
+
   const res = await fetch(`${SARVAM_API_BASE}/text-to-speech`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({
-      text: input,
-      target_language_code: targetLang,
-      speaker: options?.speaker ?? "anushka",
-      model: options?.model ?? "bulbul:v2",
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");

@@ -1,0 +1,51 @@
+{
+  "name": "BhashaVerse",
+  "short_name": "BhashaVerse",
+  "description": "Learn Indian languages by living them — voice AI, scenarios, and culture-first curricula powered by Sarvam AI.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["education", "languages", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today's lesson",
+      "short_name": "Lesson",
+      "description": "Continue your learning path",
+      "url": "/learning-path",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Mistake Garden",
+      "short_name": "Garden",
+      "description": "Review words that need attention",
+      "url": "/garden",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Scenario Rooms",
+      "short_name": "Scenarios",
+      "description": "Practice real-life conversations",
+      "url": "/scenario-rooms",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}

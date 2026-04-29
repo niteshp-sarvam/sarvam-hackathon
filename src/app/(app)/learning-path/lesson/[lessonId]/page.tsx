@@ -14,6 +14,8 @@ import { useAppStore } from "@/lib/store";
 import { getLessonById } from "@/lib/curriculum";
 import type { VocabSeed } from "@/lib/curriculum";
 import { createCard } from "@/lib/fsrs";
+import { useNativeText, speak } from "@/lib/native-text";
+import { GAME_COLORS, GAME_GRADIENTS } from "@/lib/theme-tokens";
 import {
   FadeIn,
   ScaleIn,
@@ -28,7 +30,202 @@ import {
 
 type IconName = Parameters<typeof Icon>[0]["name"];
 
+// --- Lesson Recap row ---
+function RecapRow({ seed, language }: { seed: VocabSeed; language: string }) {
+  const { nativeText: fetched } = useNativeText(
+    seed.nativeText ? null : seed.word,
+    seed.nativeText ? null : language
+  );
+  const native = seed.nativeText || fetched || seed.word;
+  const [playing, setPlaying] = useState(false);
+
+  async function play() {
+    if (playing) return;
+    setPlaying(true);
+    const audio = await speak(native, language);
+    if (audio) {
+      audio.onended = () => setPlaying(false);
+      audio.onerror = () => setPlaying(false);
+    } else {
+      setPlaying(false);
+    }
+  }
+
+  return (
+    <Box
+      display="flex"
+      align="center"
+      gap={3}
+      p={4}
+      rounded="md"
+      borderColor="primary"
+      bg="surface-secondary"
+      style={{ width: "100%" }}
+    >
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={playing ? "pause" : "audio-book"}
+        onClick={play}
+      >
+        {""}
+      </Button>
+      <Box display="flex" direction="column" gap={1} grow>
+        <Text variant="label-md">{native}</Text>
+        {native !== seed.word && (
+          <Text variant="body-xs" tone="tertiary">{seed.word}</Text>
+        )}
+      </Box>
+      <Text variant="body-sm" tone="secondary">{seed.translation}</Text>
+    </Box>
+  );
+}
+
 // --- Vocab Lesson ---
+function VocabCard({
+  seed,
+  language,
+  revealed,
+  onReveal,
+  onRate,
+}: {
+  seed: VocabSeed;
+  language: string;
+  revealed: boolean;
+  onReveal: () => void;
+  onRate: (r: number) => void;
+}) {
+  const { nativeText: fetched, loading } = useNativeText(
+    seed.nativeText ? null : seed.word,
+    seed.nativeText ? null : language
+  );
+  const native = seed.nativeText || fetched;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const playAudio = useCallback(async () => {
+    if (playing) return;
+    setPlaying(true);
+    try {
+      audioRef.current?.pause();
+      const audio = await speak(native || seed.word, language);
+      if (audio) {
+        audioRef.current = audio;
+        audio.onended = () => setPlaying(false);
+        audio.onerror = () => setPlaying(false);
+      } else {
+        setPlaying(false);
+      }
+    } catch {
+      setPlaying(false);
+    }
+  }, [native, seed.word, language, playing]);
+
+  const autoPlayedRef = useRef(false);
+  useEffect(() => {
+    if (revealed && !autoPlayedRef.current && (native || !loading)) {
+      autoPlayedRef.current = true;
+      playAudio();
+    }
+  }, [revealed, native, loading, playAudio]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+    };
+  }, []);
+
+  return (
+    <Box
+      p={10}
+      rounded="lg"
+      borderColor="primary"
+      bg="surface-secondary"
+      display="flex"
+      direction="column"
+      align="center"
+      gap={6}
+    >
+      <Badge variant="brand">{seed.category}</Badge>
+
+      <Box display="flex" direction="column" align="center" gap={2}>
+        {native ? (
+          <Text variant="heading-lg">{native}</Text>
+        ) : loading ? (
+          <Text variant="heading-lg" tone="tertiary">…</Text>
+        ) : (
+          <Text variant="heading-lg">{seed.word}</Text>
+        )}
+        {native && native !== seed.word && (
+          <Text variant="body-sm" tone="tertiary">{seed.word}</Text>
+        )}
+      </Box>
+
+      <Button
+        variant="ghost"
+        size="md"
+        icon={playing ? "pause" : "audio-book"}
+        onClick={playAudio}
+      >
+        {playing ? "Playing…" : "Listen"}
+      </Button>
+
+      <AnimatePresence mode="wait">
+        {!revealed ? (
+          <motion.div
+            key="reveal-btn"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <Button variant="secondary" size="lg" onClick={onReveal}>
+              Tap to reveal
+            </Button>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="answer"
+            initial={{ opacity: 0, rotateY: 90 }}
+            animate={{ opacity: 1, rotateY: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <Box display="flex" direction="column" align="center" gap={6}>
+              <Text variant="body-lg" tone="secondary">{seed.translation}</Text>
+              <Text variant="label-sm" tone="tertiary">How well did you know it?</Text>
+              <Box display="flex" gap={3}>
+                {[
+                  { r: 1, label: "Forgot", icon: "error" as IconName, color: GAME_COLORS.danger },
+                  { r: 2, label: "Hard", icon: "warning" as IconName, color: GAME_COLORS.warningAlt },
+                  { r: 3, label: "Good", icon: "check" as IconName, color: GAME_COLORS.success },
+                  { r: 4, label: "Easy", icon: "favourite" as IconName, color: GAME_COLORS.info },
+                ].map((opt) => (
+                  <HoverLift key={opt.r} onClick={() => onRate(opt.r)}>
+                    <div
+                      style={{
+                        padding: 12,
+                        borderRadius: 12,
+                        background: opt.color,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 4,
+                        minWidth: 64,
+                      }}
+                    >
+                      <Icon name={opt.icon} size="md" tone="inverse" />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{opt.label}</span>
+                    </div>
+                  </HoverLift>
+                ))}
+              </Box>
+            </Box>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Box>
+  );
+}
+
 function VocabRunner({
   seeds,
   language,
@@ -72,7 +269,7 @@ function VocabRunner({
               height: "100%",
               width: `${((idx + 1) / seeds.length) * 100}%`,
               borderRadius: 9999,
-              background: "linear-gradient(90deg, #58CC02, #89E219)",
+              background: GAME_GRADIENTS.successSoft,
               transition: "width 0.3s ease",
             }}
           />
@@ -88,62 +285,13 @@ function VocabRunner({
           transition={{ duration: 0.25, ease: "easeInOut" }}
           style={{ minWidth: 320, maxWidth: 480, width: "100%" }}
         >
-          <Box
-            p={10}
-            rounded="lg"
-            borderColor="primary"
-            bg="surface-secondary"
-            display="flex"
-            direction="column"
-            align="center"
-            gap={6}
-          >
-            <Badge variant="brand">{current.category}</Badge>
-            <Text variant="heading-lg">{current.word}</Text>
-
-            <AnimatePresence mode="wait">
-              {!revealed ? (
-                <motion.div key="reveal-btn" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                  <Button variant="secondary" size="lg" onClick={() => setRevealed(true)}>
-                    Tap to reveal
-                  </Button>
-                </motion.div>
-              ) : (
-                <motion.div key="answer" initial={{ opacity: 0, rotateY: 90 }} animate={{ opacity: 1, rotateY: 0 }} transition={{ duration: 0.4 }}>
-                  <Box display="flex" direction="column" align="center" gap={6}>
-                    <Text variant="body-lg" tone="secondary">{current.translation}</Text>
-                    <Text variant="label-sm" tone="tertiary">How well did you know it?</Text>
-                    <Box display="flex" gap={3}>
-                      {[
-                        { r: 1, label: "Forgot", icon: "error" as IconName, color: "#FF4B4B" },
-                        { r: 2, label: "Hard", icon: "warning" as IconName, color: "#FFC200" },
-                        { r: 3, label: "Good", icon: "check" as IconName, color: "#58CC02" },
-                        { r: 4, label: "Easy", icon: "favourite" as IconName, color: "#1CB0F6" },
-                      ].map((opt) => (
-                        <HoverLift key={opt.r} onClick={() => rate(opt.r)}>
-                          <div
-                            style={{
-                              padding: 12,
-                              borderRadius: 12,
-                              background: opt.color,
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              gap: 4,
-                              minWidth: 64,
-                            }}
-                          >
-                            <Icon name={opt.icon} size="md" tone="inverse" />
-                            <span style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{opt.label}</span>
-                          </div>
-                        </HoverLift>
-                      ))}
-                    </Box>
-                  </Box>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </Box>
+          <VocabCard
+            seed={current}
+            language={language}
+            revealed={revealed}
+            onReveal={() => setRevealed(true)}
+            onRate={rate}
+          />
         </motion.div>
       </AnimatePresence>
     </Box>
@@ -247,7 +395,7 @@ function ListenRunner({
               height: "100%",
               width: `${((idx + 1) / seeds.length) * 100}%`,
               borderRadius: 9999,
-              background: "linear-gradient(90deg, #1CB0F6, #0899DB)",
+              background: GAME_GRADIENTS.infoSoft,
               transition: "width 0.3s ease",
             }}
           />
@@ -282,36 +430,44 @@ function ListenRunner({
             const isCorrectAnswer = opt === current.translation;
             const isSelected = selected === opt;
             let bgStyle: string | undefined;
+            let borderStyle = "1.5px solid var(--tatva-border-primary, rgba(255,255,255,0.12))";
             if (selected) {
-              if (isCorrectAnswer) bgStyle = "#58CC02";
-              else if (isSelected) bgStyle = "#FF4B4B";
+              if (isCorrectAnswer) {
+                bgStyle = GAME_COLORS.success;
+                borderStyle = `1.5px solid ${GAME_COLORS.success}`;
+              } else if (isSelected) {
+                bgStyle = GAME_COLORS.danger;
+                borderStyle = `1.5px solid ${GAME_COLORS.danger}`;
+              }
             }
             return (
-              <div
+              <motion.div
                 key={opt}
+                whileHover={!selected ? { scale: 1.02 } : undefined}
+                whileTap={!selected ? { scale: 0.98 } : undefined}
                 style={{
                   cursor: selected ? "default" : "pointer",
-                  borderRadius: 12,
-                  background: bgStyle,
-                  border: "1px solid var(--tatva-border-primary, #333)",
+                  borderRadius: 14,
+                  background: bgStyle ?? "var(--tatva-surface-primary, rgba(255,255,255,0.06))",
+                  border: borderStyle,
+                  padding: "14px 18px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  transition: "background 0.2s, border 0.2s",
                 }}
                 onClick={() => pick(opt)}
               >
-                <Box
-                  p={4}
-                  rounded="md"
-                  bg={bgStyle ? undefined : "surface-primary"}
-                  display="flex"
-                  align="center"
-                  gap={3}
+                {selected && isCorrectAnswer && <Icon name="check" size="sm" tone="inverse" />}
+                {selected && isSelected && !isCorrectAnswer && <Icon name="close" size="sm" tone="inverse" />}
+                <Text
+                  variant="body-md"
+                  tone={bgStyle ? "inverse" : undefined}
+                  style={{ fontWeight: 500 }}
                 >
-                  {selected && isCorrectAnswer && <Icon name="check" size="sm" tone="inverse" />}
-                  {selected && isSelected && !isCorrectAnswer && <Icon name="close" size="sm" tone="inverse" />}
-                  <span style={{ fontWeight: 500, color: bgStyle ? "#fff" : undefined }}>
-                    {opt}
-                  </span>
-                </Box>
-              </div>
+                  {opt}
+                </Text>
+              </motion.div>
             );
           })}
         </Box>
@@ -468,7 +624,7 @@ function SpeakRunner({
               height: "100%",
               width: `${((idx + 1) / seeds.length) * 100}%`,
               borderRadius: 9999,
-              background: "linear-gradient(90deg, #FF9600, #E68600)",
+              background: GAME_GRADIENTS.speakSoft,
               transition: "width 0.3s ease",
             }}
           />
@@ -538,7 +694,7 @@ function SpeakRunner({
               exit={{ opacity: 0, scaleY: 0 }}
               style={{ width: "100%" }}
             >
-              <VoiceWaveform active color="#EF4444" barCount={28} style={{ height: 36 }} />
+              <VoiceWaveform active color={GAME_COLORS.dangerAlt} barCount={28} style={{ height: 36 }} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -578,10 +734,10 @@ function SpeakRunner({
                     borderRadius: "50%",
                     background:
                       score >= 70
-                        ? "linear-gradient(135deg, #58CC02, #46A302)"
+                        ? GAME_GRADIENTS.success
                         : score >= 40
-                        ? "linear-gradient(135deg, #FFC200, #F49000)"
-                        : "linear-gradient(135deg, #FF4B4B, #E53E3E)",
+                        ? GAME_GRADIENTS.warning
+                        : GAME_GRADIENTS.danger,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -666,7 +822,13 @@ export default function LessonPage() {
           (c) => c.word === seed.word && c.language === targetLanguage
         );
         if (!exists) {
-          const card = createCard(seed.word, seed.translation, targetLanguage, seed.category);
+          const card = createCard(
+            seed.word,
+            seed.translation,
+            targetLanguage,
+            seed.category,
+            seed.nativeText
+          );
           const rating = vocabRatings?.[i];
           if (rating && rating <= 2) {
             card.difficulty = rating === 1 ? 8 : 6;
@@ -686,10 +848,10 @@ export default function LessonPage() {
   );
 
   const TYPE_LABEL: Record<string, { icon: IconName; label: string; color: string }> = {
-    vocab: { icon: "docs", label: "Vocabulary", color: "#58CC02" },
-    listen: { icon: "audio-book", label: "Listening", color: "#1CB0F6" },
-    speak: { icon: "microphone", label: "Speaking", color: "#FF9600" },
-    scenario: { icon: "chat", label: "Scenario", color: "#CE82FF" },
+    vocab: { icon: "docs", label: "Vocabulary", color: GAME_COLORS.success },
+    listen: { icon: "audio-book", label: "Listening", color: GAME_COLORS.info },
+    speak: { icon: "microphone", label: "Speaking", color: GAME_COLORS.warningOrange },
+    scenario: { icon: "chat", label: "Scenario", color: GAME_COLORS.scenario },
   };
 
   const typeInfo = TYPE_LABEL[lesson.type] ?? TYPE_LABEL.vocab;
@@ -700,35 +862,64 @@ export default function LessonPage() {
         <Header
           type="main"
           left={{ title: "Lesson Complete" }}
+          onBack={() => router.push("/learning-path")}
         />
-        <Box grow overflow="auto" display="flex" direction="column" align="center" justify="center" gap={6} p={8}>
-          <ScaleIn>
-            <div
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: "50%",
-                background: "linear-gradient(135deg, #58CC02, #46A302)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Icon name="check" size="lg" tone="inverse" />
-            </div>
-          </ScaleIn>
-          <FadeIn delay={0.2}><Text variant="heading-lg">Well done!</Text></FadeIn>
-          <Text variant="body-md" tone="secondary">{lesson.title}</Text>
-          <Box display="flex" gap={4}>
-            <Badge variant="brand">+{lesson.xpReward} XP</Badge>
+        <Box grow overflow="auto" p={8}>
+          <Box display="flex" direction="column" align="center" gap={6} style={{ maxWidth: 560, margin: "0 auto" }}>
+            <ScaleIn>
+              <div
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: "50%",
+                  background: GAME_GRADIENTS.success,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Icon name="check" size="lg" tone="inverse" />
+              </div>
+            </ScaleIn>
+            <FadeIn delay={0.2}><Text variant="heading-lg">Well done!</Text></FadeIn>
+            <Text variant="body-md" tone="secondary">{lesson.title}</Text>
+            <Box display="flex" gap={4}>
+              <Badge variant="brand">+{lesson.xpReward} XP</Badge>
+              {seeds.length > 0 && (
+                <Badge variant="green">+{seeds.length} garden words</Badge>
+              )}
+            </Box>
+
             {seeds.length > 0 && (
-              <Badge variant="green">+{seeds.length} garden words</Badge>
+              <FadeIn delay={0.4}>
+                <Box display="flex" direction="column" gap={3} style={{ width: "100%" }}>
+                  <Text variant="label-md" tone="secondary">
+                    Words you practiced
+                  </Text>
+                  <Box display="flex" direction="column" gap={2}>
+                    {seeds.map((seed, i) => (
+                      <RecapRow key={`${seed.word}-${i}`} seed={seed} language={targetLanguage} />
+                    ))}
+                  </Box>
+                </Box>
+              </FadeIn>
             )}
-          </Box>
-          <Box display="flex" gap={3} mt={4}>
-            <Button variant="primary" size="lg" onClick={() => router.push("/learning-path")}>
-              Continue Path
-            </Button>
+
+            <Box display="flex" gap={3} mt={4}>
+              <Button
+                variant="ghost"
+                size="lg"
+                onClick={() => {
+                  setPhase("intro");
+                  startedRef.current = false;
+                }}
+              >
+                Practice again
+              </Button>
+              <Button variant="primary" size="lg" onClick={() => router.push("/learning-path")}>
+                Continue Path
+              </Button>
+            </Box>
           </Box>
         </Box>
       </div>
@@ -741,44 +932,57 @@ export default function LessonPage() {
         <Header
           type="main"
           left={{ title: unit.title }}
+          onBack={() => router.push("/learning-path")}
         />
-        <Box grow overflow="auto" display="flex" direction="column" align="center" justify="center" gap={6} p={8}>
-          <div
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 20,
-              background: `${typeInfo.color}20`,
-              border: `2px solid ${typeInfo.color}40`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+        <Box grow overflow="auto" p={8}>
+          <Box
+            display="flex"
+            direction="column"
+            align="center"
+            gap={5}
+            style={{ maxWidth: 480, margin: "32px auto 0" }}
           >
-            <Icon name={typeInfo.icon} size="lg" tone="brand" />
-          </div>
-          <Text variant="heading-lg">{lesson.title}</Text>
-          <Text variant="body-md" tone="secondary" style={{ textAlign: "center", maxWidth: 400 }}>
-            {lesson.description}
-          </Text>
-          <Box display="flex" gap={3}>
-            <Badge variant="brand">{typeInfo.label}</Badge>
-            <Badge variant="default">{lesson.durationMin} min</Badge>
-            <Badge variant="green">+{lesson.xpReward} XP</Badge>
-          </Box>
-          {seeds.length > 0 && (
-            <Text variant="body-xs" tone="tertiary">
-              {seeds.length} words to practice
-            </Text>
-          )}
-          <Box mt={4}>
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={() => setPhase("active")}
+            <div
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 20,
+                background: `${typeInfo.color}20`,
+                border: `2px solid ${typeInfo.color}40`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
             >
-              Start Lesson
-            </Button>
+              <Icon name={typeInfo.icon} size="lg" tone="brand" />
+            </div>
+            <Text variant="heading-lg">{lesson.title}</Text>
+            <Text
+              variant="body-md"
+              tone="secondary"
+              style={{ textAlign: "center" }}
+            >
+              {lesson.description}
+            </Text>
+            <Box display="flex" gap={3}>
+              <Badge variant="brand">{typeInfo.label}</Badge>
+              <Badge variant="default">{lesson.durationMin} min</Badge>
+              <Badge variant="green">+{lesson.xpReward} XP</Badge>
+            </Box>
+            {seeds.length > 0 && (
+              <Text variant="body-xs" tone="tertiary">
+                {seeds.length} words to practice
+              </Text>
+            )}
+            <Box mt={4}>
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={() => setPhase("active")}
+              >
+                Start Lesson
+              </Button>
+            </Box>
           </Box>
         </Box>
       </div>
@@ -790,6 +994,7 @@ export default function LessonPage() {
       <Header
         type="main"
         left={{ title: lesson.title }}
+        onBack={() => router.push("/learning-path")}
       />
       <Box grow overflow="auto" p={6}>
         {lesson.type === "vocab" && seeds.length > 0 && (

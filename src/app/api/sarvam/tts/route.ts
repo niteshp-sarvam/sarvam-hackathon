@@ -4,10 +4,11 @@ import { textToSpeech } from "@/lib/sarvam";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { input, target_language_code, speaker, model } = body;
+    const { input, target_language_code, speaker, model, pace } = body;
     const result = await textToSpeech(input, target_language_code, {
       speaker,
       model,
+      pace,
     });
     return NextResponse.json(result);
   } catch (error) {

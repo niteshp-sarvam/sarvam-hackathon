@@ -6,9 +6,12 @@ import {
   Box,
   Button,
   Header,
+  Icon,
   Text,
   Badge,
   MetricCard,
+  OptionGroup,
+  OptionItem,
 } from "@sarvam/tatva";
 import { useAppStore } from "@/lib/store";
 import { SCENARIO_ROOMS, SUPPORTED_LANGUAGES, GREETING_SUGGESTIONS } from "@/lib/constants";
@@ -32,6 +35,8 @@ import {
 import MeshSphere from "@/components/MeshSphere";
 import { Micdrop } from "@micdrop/client";
 import { useMicdropState, useMicdropError, useSpeakerVolume, useMicVolume } from "@micdrop/react";
+import { toast } from "sonner";
+import { GAME_COLORS, GAME_GRADIENTS } from "@/lib/theme-tokens";
 
 export default function ScenarioRoomPage({
   params,
@@ -52,16 +57,51 @@ export default function ScenarioRoomPage({
 
   const room = SCENARIO_ROOMS.find((r) => r.id === roomId);
   const lang = SUPPORTED_LANGUAGES.find((l) => l.code === room?.language);
+  const nativeLang = SUPPORTED_LANGUAGES.find((l) => l.code === nativeLanguage);
+  const nativeLangName = nativeLang?.name ?? "English";
 
   const [isComplete, setIsComplete] = useState(false);
   const [stars, setStars] = useState(0);
   const [turnCount, setTurnCount] = useState(0);
-  const [engFallbacks, setEngFallbacks] = useState(0);
+  const [nativeFallbacks, setNativeFallbacks] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [connectionError, setConnectionError] = useState<false | "connection" | "mic">(false);
 
+  const voiceStartedRef = useRef(false);
+  const startingRef = useRef(false);
+  const cancelledRef = useRef(false);
+
   const micdropState = useMicdropState();
-  useMicdropError((err) => console.error("[Micdrop]", err.message));
+  useMicdropError((err) => {
+    if (cancelledRef.current) return;
+    console.error("[Micdrop]", err.message);
+
+    const message = (err.message ?? "").toLowerCase();
+
+    const isMicError =
+      message.includes("permission") ||
+      message.includes("notallowed") ||
+      message.includes("microphone") ||
+      message.includes("mic ") ||
+      message.includes("getusermedia");
+
+    const isConnectionError =
+      message.includes("websocket") ||
+      message.includes("connect") ||
+      message.includes("network") ||
+      message.includes("disconnect") ||
+      message.includes("closed") ||
+      message.includes("server");
+
+    if (isMicError) {
+      setConnectionError("mic");
+    } else if (isConnectionError) {
+      setConnectionError("connection");
+    } else {
+      // Treat as transient — surface a toast but keep the session alive
+      toast.error(`Voice glitch: ${err.message}`, { duration: 3500 });
+    }
+  });
   const { speakerVolume, maxSpeakerVolume } = useSpeakerVolume();
   const { micVolume, maxMicVolume } = useMicVolume();
 
@@ -72,16 +112,16 @@ export default function ScenarioRoomPage({
 
   const voiceConversation = micdropState.conversation ?? [];
 
-  const voiceStartedRef = useRef(false);
-  const startingRef = useRef(false);
   useEffect(() => {
     if (!room) return;
+    cancelledRef.current = false;
     if (!voiceStartedRef.current && !startingRef.current) {
       voiceStartedRef.current = true;
       startingRef.current = true;
       startVoiceSession().finally(() => { startingRef.current = false; });
     }
     return () => {
+      cancelledRef.current = true;
       Micdrop.stop().catch(() => {});
       voiceStartedRef.current = false;
     };
@@ -91,11 +131,11 @@ export default function ScenarioRoomPage({
   function buildSystemPrompt(): string {
     if (!room || !lang) return "";
     const cfg = room.promptConfig;
-    const toleranceRule = cfg.englishTolerance === "high"
-      ? "If the learner uses English, gently reply in the target language but don't penalize them."
-      : cfg.englishTolerance === "medium"
-        ? "If the learner uses English, nudge them to try in the target language."
-        : "Respond only in the target language. If the learner uses English, ask them to try again in the target language.";
+    const toleranceRule = cfg.nativeTolerance === "high"
+      ? `If the learner uses ${nativeLangName} or another language, gently reply in ${lang.name} but don't penalize them.`
+      : cfg.nativeTolerance === "medium"
+        ? `If the learner uses ${nativeLangName} or another language, nudge them to try in ${lang.name}.`
+        : `Respond only in ${lang.name}. If the learner uses another language, ask them to try again in ${lang.name}.`;
     const formalityRule = cfg.formality === "formal"
       ? "Use formal, respectful register and expect the same."
       : cfg.formality === "polite"
@@ -123,11 +163,10 @@ ${opening}
 - Also rate the learner's performance as [STARS:1], [STARS:2], or [STARS:3] based on:
   - Task completion
   - Vocabulary range
-  - How little they fell back to English
+  - How little they fell back to their native language
 - After EVERY response, include 2-3 suggested replies the learner could say next.
-  Format: [SUGGEST:phrase1 (english meaning)|phrase2 (english meaning)|phrase3 (english meaning)]
+  Format: [SUGGEST:phrase1 (${nativeLangName} meaning)|phrase2 (${nativeLangName} meaning)|phrase3 (${nativeLangName} meaning)]
   Write the phrases in Romanized ${lang.name} so a beginner can read and pronounce them.
-  Example: [SUGGEST:Kitna hai? (How much?)|Bahut mehnga (Too expensive)|Theek hai (Okay)]
 
 Respond ONLY as the character. Do not break character.`;
   }
@@ -144,12 +183,15 @@ Respond ONLY as the character. Do not break character.`;
 
     try {
       await Micdrop.stop().catch(() => {});
+      if (cancelledRef.current) return;
       await new Promise((r) => setTimeout(r, 300));
+      if (cancelledRef.current) return;
       await Micdrop.start({
         url: wsUrl.toString(),
         vad: ["volume"],
       });
     } catch (err) {
+      if (cancelledRef.current) return;
       console.error("[VoiceSession] Failed to start:", err);
       const msg = String(err);
       const isMicError = msg.includes("Permission") || msg.includes("NotAllowed") || msg.includes("Mic");
@@ -207,11 +249,11 @@ Respond ONLY as the character. Do not break character.`;
       setIsComplete(true);
       stopVoiceSession();
 
-      const engCount = voiceConversation
+      const nativeFallbackCount = voiceConversation
         .filter((m) => m.role === "user")
         .filter((m) => "content" in m && /[a-zA-Z]{3,}/.test(m.content ?? "")).length;
       setTurnCount(voiceTurnCount);
-      setEngFallbacks(engCount);
+      setNativeFallbacks(nativeFallbackCount);
 
       setTimeout(() => fireConfetti(finalStars >= 2 ? "sides" : "center"), 400);
       addScenarioResult({
@@ -219,7 +261,7 @@ Respond ONLY as the character. Do not break character.`;
         stars: finalStars,
         completedAt: new Date().toISOString(),
         vocabUsed: voiceTurnCount,
-        engFallbackCount: engCount,
+        engFallbackCount: nativeFallbackCount,
       });
       addActivity({
         type: "scenario_completed",
@@ -290,8 +332,8 @@ Respond ONLY as the character. Do not break character.`;
                 height: 72,
                 borderRadius: "50%",
                 background: connectionError === "mic"
-                  ? "linear-gradient(135deg, #FF4B4B, #E53E3E)"
-                  : "linear-gradient(135deg, #FFC200, #F49000)",
+                  ? GAME_GRADIENTS.danger
+                  : GAME_GRADIENTS.warning,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -481,7 +523,7 @@ Respond ONLY as the character. Do not break character.`;
                       }}
                       style={{
                         fontSize: 28,
-                        color: s <= stars ? "#FFC800" : "#D0D0D0",
+                        color: s <= stars ? GAME_COLORS.xpStar : GAME_COLORS.starInactive,
                       }}
                     >
                       ★
@@ -498,8 +540,8 @@ Respond ONLY as the character. Do not break character.`;
                 </StaggerItem>
                 <StaggerItem>
                   <MetricCard
-                    heading="English Fallbacks"
-                    value={engFallbacks.toString()}
+                    heading="Native Fallbacks"
+                    value={nativeFallbacks.toString()}
                   />
                 </StaggerItem>
                 <StaggerItem>
@@ -524,7 +566,7 @@ Respond ONLY as the character. Do not break character.`;
                         setIsComplete(false);
                         setStars(0);
                         setTurnCount(0);
-                        setEngFallbacks(0);
+                        setNativeFallbacks(0);
                         voiceStartedRef.current = false;
                         setRestartKey((k) => k + 1);
                       }}
@@ -532,6 +574,39 @@ Respond ONLY as the character. Do not break character.`;
                       Replay
                     </Button>
                   </HoverLift>
+                </Box>
+              </FadeIn>
+              <FadeIn delay={0.8}>
+                <Box display="flex" direction="column" gap={3} style={{ width: "100%" }}>
+                  <Text variant="label-md" tone="secondary">What&apos;s next?</Text>
+                  <OptionGroup>
+                    <OptionItem
+                      label="Try Another Room"
+                      description="Practice a different scenario"
+                      icon={<Icon name="chat-multiple" size="sm" tone="secondary" />}
+                      onClick={() => router.push("/scenario-rooms")}
+                    />
+                    <OptionItem
+                      label="Practice Pronunciation"
+                      description="Shadow repeat to sharpen your accent"
+                      icon={<Icon name="microphone" size="sm" tone="secondary" />}
+                      onClick={() => router.push("/shadow-speaking")}
+                    />
+                    {nativeFallbacks > 0 && (
+                      <OptionItem
+                        label="Review in Garden"
+                        description="Strengthen words you struggled with"
+                        icon={<Icon name="plant" size="sm" tone="secondary" />}
+                        onClick={() => router.push("/garden")}
+                      />
+                    )}
+                    <OptionItem
+                      label="Back to Dashboard"
+                      description="See your overall progress"
+                      icon={<Icon name="home" size="sm" tone="secondary" />}
+                      onClick={() => router.push("/dashboard")}
+                    />
+                  </OptionGroup>
                 </Box>
               </FadeIn>
             </Box>

@@ -1,0 +1,182 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ───── Auth.js models ─────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String
+
+  sessions      Session[]
+
+  profile              UserProfile?
+  gardenCards          GardenCard[]
+  scenarioResults      ScenarioResult[]
+  lessonProgress       LessonProgress[]
+  activityLog          ActivityLogEntry[]
+  dailyXp              DailyXp[]
+  foundationMilestones FoundationMilestone[]
+  unlockedMilestones   UnlockedMilestone[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ───── App-specific models ─────
+
+model UserProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  transliteratedName String  @default("")
+  neighborhood       String  @default("")
+  profession         String  @default("")
+  hobbies            String[]
+  motivation         String  @default("")
+
+  targetLanguage     String?
+  nativeLanguage     String  @default("en")
+  isOnboarded        Boolean @default(false)
+
+  xp                 Int     @default(0)
+  level              Int     @default(1)
+  streak             Int     @default(0)
+  lastActiveDate     DateTime?
+
+  foundationLessonIds String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GardenCard {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  word        String
+  translation String
+  language    String
+  category    String
+
+  stability     Float @default(0)
+  difficulty    Float @default(0)
+  elapsedDays   Float @default(0)
+  scheduledDays Float @default(0)
+  reps          Int   @default(0)
+  lapses        Int   @default(0)
+  state         String @default("new")
+  gardenStage   String @default("seed")
+
+  lastReview DateTime?
+  nextReview DateTime  @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, nextReview])
+  @@index([userId, gardenStage])
+}
+
+model ScenarioResult {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  roomId           String
+  stars            Int
+  completedAt      DateTime @default(now())
+  vocabUsed        Int      @default(0)
+  engFallbackCount Int      @default(0)
+
+  @@unique([userId, roomId])
+  @@index([userId])
+}
+
+model LessonProgress {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lessonId    String
+  status      String
+  completedAt DateTime?
+  xpEarned    Int?
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+}
+
+model ActivityLogEntry {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        String
+  referenceId String
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model DailyXp {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date   DateTime @db.Date
+  earned Int      @default(0)
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+model FoundationMilestone {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  milestoneId String
+  achievedAt  DateTime @default(now())
+
+  @@unique([userId, milestoneId])
+}
+
+model UnlockedMilestone {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  milestoneId String
+  unlockedAt  DateTime @default(now())
+
+  @@unique([userId, milestoneId])
+}
