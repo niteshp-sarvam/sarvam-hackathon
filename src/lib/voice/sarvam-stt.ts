@@ -136,42 +136,35 @@ export class SarvamSTT extends STT {
 
       socket.addEventListener("message", (event) => {
         const raw = event.data.toString();
-        console.log("[SarvamSTT] Raw message:", raw.slice(0, 300));
+        console.log("[SarvamSTT] Raw message:", raw.slice(0, 400));
         try {
           const message = JSON.parse(raw);
 
-          if (message.type === "speech_start") {
-            console.log("[SarvamSTT] Speech detected");
-            return;
-          }
-          if (message.type === "speech_end") {
-            console.log("[SarvamSTT] Speech ended");
+          if (message.type === "events") {
+            const signal = message.data?.signal_type;
+            console.log(`[SarvamSTT] Event: ${signal}`);
             return;
           }
 
-          const transcript =
-            message.text ??
-            message.transcript ??
-            message.data?.transcript ??
-            message.data?.text ??
-            "";
+          if (message.type === "error") {
+            console.error("[SarvamSTT] API error:", message.data?.message ?? message.data?.error);
+            return;
+          }
 
-          const isFinal =
-            message.type === "transcript" ||
-            message.type === "final" ||
-            message.is_final;
-
-          console.log(`[SarvamSTT] Parsed: type=${message.type} isFinal=${isFinal} transcript="${transcript}"`);
-
-          if (isFinal && transcript) {
-            console.log(`[SarvamSTT] Emitting transcript: "${transcript}"`);
-            this.emit("Transcript", transcript);
-
-            if (this.transcriptionTimeout) {
-              clearTimeout(this.transcriptionTimeout);
-              this.transcriptionTimeout = undefined;
+          if (message.type === "data") {
+            const transcript = message.data?.transcript ?? "";
+            console.log(`[SarvamSTT] Transcript: "${transcript}"`);
+            if (transcript) {
+              this.emit("Transcript", transcript);
+              if (this.transcriptionTimeout) {
+                clearTimeout(this.transcriptionTimeout);
+                this.transcriptionTimeout = undefined;
+              }
             }
+            return;
           }
+
+          console.log(`[SarvamSTT] Unknown type: ${message.type}`);
         } catch {
           console.log("[SarvamSTT] Non-JSON message:", raw.slice(0, 100));
         }

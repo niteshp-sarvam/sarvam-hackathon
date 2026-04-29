@@ -24,16 +24,34 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
   }
 
   protected async generateAnswer(stream: PassThrough): Promise<void> {
+    console.log("[SarvamAgent] generateAnswer called, conversation length:", this.conversation.length);
     const abortController = new AbortController();
     this.abortController = abortController;
 
     try {
-      const messages = this.conversation.map((m) => {
+      const raw = this.conversation.map((m) => {
         if (m.role === "tool_call" || m.role === "tool_result") {
           return { role: "assistant" as const, content: JSON.stringify(m) };
         }
         return { role: m.role, content: m.content };
       });
+
+      // Prepend system prompt and enforce strict user/assistant alternation
+      const messages: { role: string; content: string }[] = [];
+      if (this.options.systemPrompt) {
+        messages.push({ role: "system", content: this.options.systemPrompt });
+      }
+      for (const m of raw) {
+        if (m.role === "system") continue;
+        const prev = messages[messages.length - 1];
+        if (prev && prev.role === m.role) {
+          prev.content += " " + m.content;
+        } else {
+          messages.push(m);
+        }
+      }
+
+      console.log("[SarvamAgent] Sending messages:", JSON.stringify(messages.map(m => ({ role: m.role, content: m.content.slice(0, 60) }))));
 
       const res = await fetch(`${SARVAM_API_BASE}/v1/chat/completions`, {
         method: "POST",
@@ -46,6 +64,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
           messages,
           temperature: this.options.temperature ?? 0.7,
           max_tokens: this.options.maxTokens ?? 1024,
+          reasoning_effort: null,
           stream: true,
         }),
         signal: abortController.signal,
@@ -64,6 +83,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       const decoder = new TextDecoder();
       let fullMessage = "";
       let buffer = "";
+      let insideThink = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -87,7 +107,30 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
             const delta = parsed.choices?.[0]?.delta?.content;
             if (delta) {
               fullMessage += delta;
-              stream.write(delta);
+
+              // Strip <think>...</think> blocks from TTS stream
+              let text = delta;
+              if (insideThink) {
+                const endIdx = text.indexOf("</think>");
+                if (endIdx !== -1) {
+                  insideThink = false;
+                  text = text.slice(endIdx + 8);
+                } else {
+                  text = "";
+                }
+              }
+              if (!insideThink) {
+                const startIdx = text.indexOf("<think>");
+                if (startIdx !== -1) {
+                  insideThink = true;
+                  const before = text.slice(0, startIdx);
+                  if (before) stream.write(before);
+                  text = "";
+                }
+              }
+              if (!insideThink && text) {
+                stream.write(text);
+              }
             }
           } catch {
             // malformed JSON chunk, skip
@@ -102,15 +145,20 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
           const content = parsed.choices?.[0]?.message?.content ?? "";
           if (content) {
             fullMessage = content;
-            stream.write(content);
+            const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+            if (cleaned) stream.write(cleaned);
           }
         } catch {
           // not parseable
         }
       }
 
-      if (fullMessage) {
-        const { message, metadata } = this.extract(fullMessage);
+      // Strip think blocks for conversation storage
+      const cleanedMessage = fullMessage.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      console.log(`[SarvamAgent] Response: "${cleanedMessage.slice(0, 150)}"`);
+
+      if (cleanedMessage) {
+        const { message, metadata } = this.extract(cleanedMessage);
         this.addAssistantMessage(message, metadata);
       }
 

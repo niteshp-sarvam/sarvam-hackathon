@@ -31,7 +31,6 @@ wss.on("connection", (socket, req) => {
   const roomId = url.searchParams.get("roomId") ?? "unknown";
   const langCode = url.searchParams.get("lang") ?? "hi-IN";
   const systemPrompt = url.searchParams.get("systemPrompt") ?? "";
-  const firstMessage = url.searchParams.get("firstMessage") ?? undefined;
 
   console.log(`[voice-server] New connection: room=${roomId}, lang=${langCode}`);
 
@@ -63,7 +62,6 @@ wss.on("connection", (socket, req) => {
   });
 
   new MicdropServer(socket as any, {
-    firstMessage,
     agent,
     stt,
     tts,

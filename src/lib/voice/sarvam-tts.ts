@@ -10,8 +10,8 @@ export interface SarvamTTSOptions {
   connectionTimeout?: number;
 }
 
-const DEFAULT_MODEL = "bulbul:v2";
-const DEFAULT_SPEAKER = "anushka";
+const DEFAULT_MODEL = "bulbul:v3";
+const DEFAULT_SPEAKER = "shubh";
 const DEFAULT_CONNECTION_TIMEOUT = 5000;
 
 /**
@@ -36,26 +36,41 @@ export class SarvamTTS extends TTS {
   speak(textStream: Readable) {
     this.canceled = false;
     this.isProcessing = true;
+    let textBuffer = "";
 
     textStream.on("data", async (chunk: Buffer) => {
       if (this.canceled) return;
       const text = chunk.toString("utf-8");
-      if (!text.trim()) return;
-      await this.initPromise;
-      this.sendText(text);
+      textBuffer += text;
+
+      // Send at sentence boundaries to avoid tiny fragments the API rejects
+      const sentenceEnd = /[।.!?\n]$/;
+      if (sentenceEnd.test(textBuffer.trim()) && textBuffer.trim().length >= 10) {
+        const toSend = textBuffer.trim();
+        textBuffer = "";
+        console.log(`[SarvamTTS] Sending sentence: "${toSend.slice(0, 80)}"`);
+        await this.initPromise;
+        this.sendText(toSend);
+      }
     });
 
     textStream.on("end", async () => {
       if (this.canceled) return;
       await this.initPromise;
-      // Flush remaining buffered text
+      // Send any remaining buffered text
+      if (textBuffer.trim()) {
+        console.log(`[SarvamTTS] Sending remaining: "${textBuffer.trim().slice(0, 80)}"`);
+        this.sendText(textBuffer.trim());
+        textBuffer = "";
+      }
       if (this.socket?.readyState === WebSocket.OPEN) {
         this.socket.send(JSON.stringify({ type: "flush" }));
-        this.log("Flushed text buffer");
+        console.log("[SarvamTTS] Sent flush");
       }
     });
 
-    textStream.on("error", () => {
+    textStream.on("error", (err) => {
+      console.error("[SarvamTTS] Stream error:", err);
       this.isProcessing = false;
     });
   }
@@ -89,13 +104,14 @@ export class SarvamTTS extends TTS {
       });
 
       const url = `wss://api.sarvam.ai/text-to-speech/ws?${params.toString()}`;
+      console.log(`[SarvamTTS] Connecting to ${url.slice(0, 80)}...`);
       const socket = new WebSocket(url, {
         headers: { "api-subscription-key": this.options.apiKey },
       });
       this.socket = socket;
 
       const timeout = setTimeout(() => {
-        this.log("Connection timeout");
+        console.log("[SarvamTTS] Connection timeout");
         socket.removeAllListeners();
         socket.close();
         this.socket = undefined;
@@ -104,20 +120,19 @@ export class SarvamTTS extends TTS {
 
       socket.addEventListener("open", () => {
         clearTimeout(timeout);
-        this.log("TTS connection opened");
+        console.log("[SarvamTTS] Connection opened");
 
-        // Send config message first
-        this.socket?.send(
-          JSON.stringify({
-            type: "config",
-            data: {
-              speaker: this.options.speaker ?? DEFAULT_SPEAKER,
-              target_language_code: this.options.languageCode,
-              output_audio_codec: "pcm",
-              min_buffer_size: 30,
-            },
-          })
-        );
+        const configMsg = {
+          type: "config",
+          data: {
+            speaker: this.options.speaker ?? DEFAULT_SPEAKER,
+            target_language_code: this.options.languageCode,
+            output_audio_codec: "linear16",
+            speech_sample_rate: "16000",
+          },
+        };
+        console.log("[SarvamTTS] Sending config:", JSON.stringify(configMsg));
+        this.socket?.send(JSON.stringify(configMsg));
 
         // Keep-alive every 50s (timeout is 60s)
         this.keepAliveInterval = setInterval(() => {
@@ -131,13 +146,13 @@ export class SarvamTTS extends TTS {
 
       socket.addEventListener("error", (error) => {
         clearTimeout(timeout);
-        this.log("WebSocket error:", error);
+        console.error("[SarvamTTS] WebSocket error:", error);
         reject(new Error("WebSocket connection error"));
       });
 
       socket.addEventListener("close", ({ code, reason }) => {
         clearTimeout(timeout);
-        this.log("TTS connection closed", { code, reason });
+        console.log(`[SarvamTTS] Connection closed: code=${code} reason=${reason}`);
         if (this.keepAliveInterval) {
           clearInterval(this.keepAliveInterval);
           this.keepAliveInterval = undefined;
@@ -146,21 +161,24 @@ export class SarvamTTS extends TTS {
 
       socket.addEventListener("message", (event) => {
         if (this.canceled) return;
+        const raw = event.data.toString();
         try {
-          const message = JSON.parse(event.data.toString());
+          const message = JSON.parse(raw);
 
           if (message.type === "audio" && message.data?.audio) {
             const audioBuffer = Buffer.from(message.data.audio, "base64");
+            console.log(`[SarvamTTS] Audio chunk: ${audioBuffer.byteLength} bytes`);
             this.emit("Audio", audioBuffer);
-            this.log(`Received audio chunk (${audioBuffer.byteLength} bytes)`);
+          } else {
+            console.log(`[SarvamTTS] Message: ${raw.slice(0, 200)}`);
           }
 
           if (message.type === "event" && message.data?.event_type === "final") {
-            this.log("TTS stream complete");
+            console.log("[SarvamTTS] Stream complete");
             this.isProcessing = false;
           }
         } catch {
-          // non-JSON message, ignore
+          console.log("[SarvamTTS] Non-JSON:", raw.slice(0, 100));
         }
       });
     });

@@ -135,13 +135,11 @@ Respond ONLY as the character. Do not break character.`;
     if (!room || !lang) return;
     setConnectionError(false);
     const systemPrompt = buildSystemPrompt();
-    const firstMessage = `Start the scenario. Greet me in ${lang.name}.`;
 
     const wsUrl = new URL(VOICE_SERVER_URL);
     wsUrl.searchParams.set("roomId", room.id);
     wsUrl.searchParams.set("lang", `${lang.code}-IN`);
     wsUrl.searchParams.set("systemPrompt", systemPrompt);
-    wsUrl.searchParams.set("firstMessage", firstMessage);
 
     try {
       await Micdrop.stop().catch(() => {});
