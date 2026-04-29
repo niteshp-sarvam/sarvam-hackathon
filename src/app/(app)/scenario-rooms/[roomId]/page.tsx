@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useRef, useCallback, useEffect } from "react";
+import { use, useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Box,
@@ -11,7 +11,7 @@ import {
   MetricCard,
 } from "@sarvam/tatva";
 import { useAppStore } from "@/lib/store";
-import { SCENARIO_ROOMS, SUPPORTED_LANGUAGES } from "@/lib/constants";
+import { SCENARIO_ROOMS, SUPPORTED_LANGUAGES, GREETING_SUGGESTIONS } from "@/lib/constants";
 import { createCard } from "@/lib/fsrs";
 import { getCurriculum } from "@/lib/curriculum";
 import {
@@ -20,21 +20,18 @@ import {
   StaggerContainer,
   StaggerItem,
   HoverLift,
-  PulseRing,
-  VoiceWaveform,
+  TranscriptPanel,
+  SuggestionChips,
+  HintCard,
+  parseSuggestions,
+  stripSuggestions,
   AnimatePresence,
   motion,
   fireConfetti,
 } from "@/components/motion";
+import MeshSphere from "@/components/MeshSphere";
 import { Micdrop } from "@micdrop/client";
-import { useMicdropState, useMicdropError } from "@micdrop/react";
-
-interface Message {
-  role: "user" | "assistant" | "system";
-  content: string;
-  translation?: string;
-  audioUrl?: string;
-}
+import { useMicdropState, useMicdropError, useSpeakerVolume, useMicVolume } from "@micdrop/react";
 
 export default function ScenarioRoomPage({
   params,
@@ -62,27 +59,27 @@ export default function ScenarioRoomPage({
   const [engFallbacks, setEngFallbacks] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [connectionError, setConnectionError] = useState<false | "connection" | "mic">(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const micdropState = useMicdropState();
   useMicdropError((err) => console.error("[Micdrop]", err.message));
+  const { speakerVolume, maxSpeakerVolume } = useSpeakerVolume();
+  const { micVolume, maxMicVolume } = useMicVolume();
+
+  const normalizedSpeaker = maxSpeakerVolume > 0 ? speakerVolume / maxSpeakerVolume : 0;
+  const normalizedMic = maxMicVolume > 0 ? micVolume / maxMicVolume : 0;
 
   const VOICE_SERVER_URL = process.env.NEXT_PUBLIC_VOICE_SERVER_URL ?? "ws://localhost:8081";
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
   const voiceConversation = micdropState.conversation ?? [];
 
-  useEffect(() => scrollToBottom(), [voiceConversation.length, scrollToBottom]);
-
   const voiceStartedRef = useRef(false);
+  const startingRef = useRef(false);
   useEffect(() => {
     if (!room) return;
-    if (!voiceStartedRef.current) {
+    if (!voiceStartedRef.current && !startingRef.current) {
       voiceStartedRef.current = true;
-      startVoiceSession();
+      startingRef.current = true;
+      startVoiceSession().finally(() => { startingRef.current = false; });
     }
     return () => {
       Micdrop.stop().catch(() => {});
@@ -127,6 +124,10 @@ ${opening}
   - Task completion
   - Vocabulary range
   - How little they fell back to English
+- After EVERY response, include 2-3 suggested replies the learner could say next.
+  Format: [SUGGEST:phrase1 (english meaning)|phrase2 (english meaning)|phrase3 (english meaning)]
+  Write the phrases in Romanized ${lang.name} so a beginner can read and pronounce them.
+  Example: [SUGGEST:Kitna hai? (How much?)|Bahut mehnga (Too expensive)|Theek hai (Okay)]
 
 Respond ONLY as the character. Do not break character.`;
   }
@@ -143,6 +144,7 @@ Respond ONLY as the character. Do not break character.`;
 
     try {
       await Micdrop.stop().catch(() => {});
+      await new Promise((r) => setTimeout(r, 300));
       await Micdrop.start({
         url: wsUrl.toString(),
         vad: ["volume"],
@@ -170,6 +172,30 @@ Respond ONLY as the character. Do not break character.`;
 
   const lastAssistantMsg = [...voiceConversation].reverse().find((m) => m.role === "assistant");
   const lastAssistantContent = lastAssistantMsg && "content" in lastAssistantMsg ? (lastAssistantMsg.content ?? "") : "";
+
+  const currentSuggestions = useMemo(() => {
+    if (voiceTurnCount === 0 && room) {
+      return GREETING_SUGGESTIONS[room.language] ?? [];
+    }
+    if (lastAssistantContent) {
+      return parseSuggestions(lastAssistantContent);
+    }
+    return [];
+  }, [voiceTurnCount, lastAssistantContent, room]);
+
+  const transcriptMessages = useMemo(() => {
+    return voiceConversation
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((msg) => {
+        const rawContent = "content" in msg ? (msg.content ?? "") : "";
+        const content = stripSuggestions(
+          rawContent.replace("[SCENARIO_COMPLETE]", "").replace(/\[STARS:\d\]/g, "")
+        ).trim();
+        return { role: msg.role as "user" | "assistant", content };
+      })
+      .filter((m) => m.content.length > 0);
+  }, [voiceConversation]);
+
   useEffect(() => {
     if (!lastAssistantContent || isComplete) return;
     const content = lastAssistantContent;
@@ -224,6 +250,12 @@ Respond ONLY as the character. Do not break character.`;
     };
   }, []);
 
+  const sphereState: "idle" | "listening" | "speaking" | "processing" =
+    micdropState.isAssistantSpeaking ? "speaking"
+    : micdropState.isListening || micdropState.isUserSpeaking ? "listening"
+    : micdropState.isProcessing ? "processing"
+    : "idle";
+
   if (!room || !lang) {
     return (
       <Box p={8} display="flex" direction="column" align="center" gap={4}>
@@ -241,7 +273,6 @@ Respond ONLY as the character. Do not break character.`;
         type="main"
         left={{
           title: room.title,
-          subtitle: `${lang.nativeName} • ${room.difficulty} • Goal: ${room.goal}`,
         }}
         onBack={() => router.push("/scenario-rooms")}
       />
@@ -297,115 +328,121 @@ Respond ONLY as the character. Do not break character.`;
           </Box>
         )}
 
-        {/* Voice conversation */}
+        {/* Voice conversation — immersive layout */}
         {!connectionError && !isComplete && (
-          <Box display="flex" direction="column" grow overflow="hidden">
-            <Box grow overflow="auto" p={6}>
-              <Box display="flex" direction="column" gap={4}>
-                <Box p={4} rounded="lg" bg="tertiary" display="flex" direction="column" gap={2}>
-                  <Text variant="label-sm" tone="secondary">Voice Scenario</Text>
-                  <Text variant="body-sm">{room.description}</Text>
-                  <Box display="flex" gap={2}>
-                    <Badge variant="brand">{room.difficulty}</Badge>
-                    <Badge variant="indigo">{lang.nativeName}</Badge>
-                  </Box>
-                </Box>
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+          }}>
+            {/* Top section: Sphere + Status */}
+            <div style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "24px 16px 12px",
+              gap: 12,
+              flexShrink: 0,
+            }}>
+              <motion.div
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.1 }}
+                className="sphere-container"
+                data-state={sphereState}
+              >
+                <MeshSphere
+                  state={sphereState}
+                  speakerVolume={normalizedSpeaker}
+                  micVolume={normalizedMic}
+                  size={220}
+                />
+              </motion.div>
 
-                {voiceConversation
-                  .filter((m) => m.role === "user" || m.role === "assistant")
-                  .map((msg, i) => {
-                    const Wrapper = msg.role === "user" ? SlideIn : FadeIn;
-                    const wrapperProps = msg.role === "user" ? { from: "right" as const } : { direction: "up" as const };
-                    const rawContent = "content" in msg ? (msg.content ?? "") : "";
-                    const content = rawContent
-                      .replace("[SCENARIO_COMPLETE]", "")
-                      .replace(/\[STARS:\d\]/g, "")
-                      .trim();
-                    if (!content) return null;
-                    return (
-                      <Wrapper key={i} {...wrapperProps}>
-                        <Box display="flex" justify={msg.role === "user" ? "end" : "start"}>
-                          <div style={{ maxWidth: "75%" }}>
-                            <Box
-                              p={4} rounded="lg"
-                              bg={msg.role === "user" ? "brand" : "surface-secondary"}
-                              display="flex" direction="column" gap={2}
-                            >
-                              <Text variant="body-sm" tone={msg.role === "user" ? "inverse" : "default"}>
-                                {content}
-                              </Text>
-                            </Box>
-                          </div>
-                        </Box>
-                      </Wrapper>
-                    );
-                  })}
-
-                <AnimatePresence>
-                  {micdropState.isAssistantSpeaking && (
-                    <FadeIn>
-                      <Box display="flex" justify="start">
-                        <div style={{ maxWidth: "75%" }}>
-                          <Box p={4} rounded="lg" bg="surface-secondary" display="flex" direction="column" gap={2}>
-                            <VoiceWaveform active color="#58CC02" barCount={20} style={{ height: 24 }} />
-                          </Box>
-                        </div>
-                      </Box>
-                    </FadeIn>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={sphereState}
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 6 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  {sphereState === "listening" && (
+                    <>
+                      <Badge variant="red">Listening</Badge>
+                      <Text variant="body-xs" tone="secondary">Speak now...</Text>
+                    </>
                   )}
-                </AnimatePresence>
+                  {sphereState === "speaking" && (
+                    <Badge variant="green">Speaking</Badge>
+                  )}
+                  {sphereState === "processing" && (
+                    <Badge variant="yellow">Processing</Badge>
+                  )}
+                  {sphereState === "idle" && micdropState.isStarting && (
+                    <Badge variant="default">Connecting...</Badge>
+                  )}
+                  {sphereState === "idle" && !micdropState.isStarting && (
+                    <Badge variant="default">Ready</Badge>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
 
-                <div ref={messagesEndRef} />
-              </Box>
-            </Box>
-
-            {/* Voice status bar */}
-            <Box borderColor="primary" borderSides="t" display="flex" direction="column">
-              <Box p={4} display="flex" align="center" justify="between">
-                <Box display="flex" align="center" gap={4}>
-                  <AnimatePresence mode="wait">
-                    {micdropState.isListening || micdropState.isUserSpeaking ? (
-                      <motion.div key="listening" initial={{ scale: 0.8 }} animate={{ scale: 1 }} exit={{ scale: 0.8 }}>
-                        <PulseRing color="rgba(239,68,68,0.4)">
-                          <Badge variant="red">Listening</Badge>
-                        </PulseRing>
-                      </motion.div>
-                    ) : micdropState.isProcessing ? (
-                      <motion.div key="processing" initial={{ scale: 0.8 }} animate={{ scale: 1 }} exit={{ scale: 0.8 }}>
-                        <Badge variant="yellow">Processing</Badge>
-                      </motion.div>
-                    ) : micdropState.isAssistantSpeaking ? (
-                      <motion.div key="speaking" initial={{ scale: 0.8 }} animate={{ scale: 1 }} exit={{ scale: 0.8 }}>
-                        <Badge variant="green">Speaking</Badge>
-                      </motion.div>
-                    ) : micdropState.isStarting ? (
-                      <motion.div key="starting" initial={{ scale: 0.8 }} animate={{ scale: 1 }} exit={{ scale: 0.8 }}>
-                        <Badge variant="default">Connecting...</Badge>
-                      </motion.div>
-                    ) : (
-                      <motion.div key="idle" initial={{ scale: 0.8 }} animate={{ scale: 1 }} exit={{ scale: 0.8 }}>
-                        <Badge variant="default">Ready</Badge>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                  <VoiceWaveform
-                    active={micdropState.isListening || micdropState.isAssistantSpeaking}
-                    color={micdropState.isListening ? "#EF4444" : "#58CC02"}
-                    barCount={20}
-                    style={{ height: 20 }}
+            {/* Suggestion chips */}
+            <div style={{ padding: "0 20px", flexShrink: 0 }}>
+              <AnimatePresence mode="wait">
+                {currentSuggestions.length > 0 && (
+                  <SuggestionChips
+                    key={currentSuggestions.map((s) => s.phrase).join(",")}
+                    suggestions={currentSuggestions}
+                    isUserSpeaking={micdropState.isUserSpeaking}
+                    style={{ padding: "4px 0" }}
                   />
-                  <Text variant="body-sm" tone="secondary">
-                    Turns: {voiceTurnCount}
-                  </Text>
-                </Box>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Transcript panel */}
+            <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+              <TranscriptPanel
+                messages={transcriptMessages}
+                isAssistantSpeaking={micdropState.isAssistantSpeaking}
+                style={{ height: "100%" }}
+              />
+            </div>
+
+            {/* Bottom bar */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "8px 16px 12px",
+              gap: 8,
+              borderTop: "1px solid var(--tatva-border-primary, rgba(255,255,255,0.08))",
+              flexShrink: 0,
+            }}>
+              <HintCard
+                goal={room.goal}
+                suggestions={currentSuggestions}
+                style={{ flex: 1, maxWidth: 360 }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Text variant="body-xs" tone="secondary">
+                  Turn {voiceTurnCount}
+                </Text>
                 <HoverLift>
                   <Button variant="destructive" onClick={() => stopVoiceSession()}>
                     End
                   </Button>
                 </HoverLift>
-              </Box>
-            </Box>
-          </Box>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Completion panel */}

@@ -15,6 +15,7 @@ import {
   type CSSProperties,
   useEffect,
   useRef,
+  useState,
   forwardRef,
 } from "react";
 
@@ -603,6 +604,300 @@ export function VoiceWaveform({
         />
       ))}
     </div>
+  );
+}
+
+// --------------- TranscriptPanel ---------------
+interface TranscriptMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export function TranscriptPanel({
+  messages,
+  isAssistantSpeaking,
+  className,
+  style,
+}: {
+  messages: TranscriptMessage[];
+  isAssistantSpeaking?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className={`transcript-panel ${className ?? ""}`}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
+        overflowY: "auto",
+        minHeight: 0,
+        ...style,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 16px" }}>
+        <AnimatePresence initial={false}>
+          {messages.map((msg, i) => (
+            <motion.div
+              key={`${i}-${msg.role}`}
+              layout
+              initial={{
+                opacity: 0,
+                y: 16,
+                x: msg.role === "user" ? 20 : -20,
+                scale: 0.95,
+              }}
+              animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
+              transition={{ type: "spring", stiffness: 350, damping: 28 }}
+              style={{
+                display: "flex",
+                justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+              }}
+            >
+              <div
+                style={{
+                  maxWidth: "80%",
+                  padding: "8px 14px",
+                  borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                  background: msg.role === "user"
+                    ? "linear-gradient(135deg, rgba(88,204,2,0.9), rgba(60,170,0,0.9))"
+                    : "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
+                  backdropFilter: "blur(8px)",
+                  border: msg.role === "assistant" ? "1px solid var(--tatva-border-primary, rgba(255,255,255,0.08))" : "none",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    color: msg.role === "user" ? "#fff" : "var(--tatva-content-primary, #fff)",
+                  }}
+                >
+                  {msg.content}
+                </span>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {isAssistantSpeaking && (
+            <motion.div
+              key="speaking-indicator"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -5 }}
+              style={{ display: "flex", justifyContent: "flex-start" }}
+            >
+              <div
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "16px 16px 16px 4px",
+                  background: "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
+                  border: "1px solid var(--tatva-border-primary, rgba(255,255,255,0.08))",
+                }}
+              >
+                <VoiceWaveform active color="#58CC02" barCount={12} style={{ height: 18 }} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+// --------------- SuggestionChips ---------------
+interface Suggestion {
+  phrase: string;
+  meaning: string;
+}
+
+export function parseSuggestions(text: string): Suggestion[] {
+  const match = text.match(/\[SUGGEST:([^\]]+)\]/);
+  if (!match) return [];
+  return match[1].split("|").map((s) => {
+    const trimmed = s.trim();
+    const parenMatch = trimmed.match(/^(.+?)\s*\((.+?)\)\s*$/);
+    if (parenMatch) return { phrase: parenMatch[1].trim(), meaning: parenMatch[2].trim() };
+    return { phrase: trimmed, meaning: "" };
+  });
+}
+
+export function stripSuggestions(text: string): string {
+  return text.replace(/\[SUGGEST:[^\]]+\]/g, "").trim();
+}
+
+export function SuggestionChips({
+  suggestions,
+  isUserSpeaking,
+  style,
+}: {
+  suggestions: Suggestion[];
+  isUserSpeaking?: boolean;
+  style?: CSSProperties;
+}) {
+  const [highlighted, setHighlighted] = useState<number | null>(null);
+
+  if (!suggestions.length) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: isUserSpeaking ? 0.3 : 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        justifyContent: "center",
+        ...style,
+      }}
+    >
+      {suggestions.map((s, i) => (
+        <motion.button
+          key={`${s.phrase}-${i}`}
+          initial={{ opacity: 0, y: 12, scale: 0.9 }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            scale: highlighted === i ? 1.05 : 1,
+          }}
+          transition={{
+            type: "spring",
+            stiffness: 400,
+            damping: 25,
+            delay: i * 0.08,
+          }}
+          whileHover={{ scale: 1.06, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setHighlighted(highlighted === i ? null : i)}
+          style={{
+            padding: "6px 14px",
+            borderRadius: 20,
+            border: highlighted === i
+              ? "1.5px solid rgba(88,204,2,0.6)"
+              : "1px solid var(--tatva-border-primary, rgba(255,255,255,0.12))",
+            background: highlighted === i
+              ? "rgba(88,204,2,0.12)"
+              : "var(--tatva-surface-secondary, rgba(255,255,255,0.04))",
+            backdropFilter: "blur(8px)",
+            cursor: "pointer",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 2,
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tatva-content-primary, #fff)" }}>
+            {s.phrase}
+          </span>
+          {s.meaning && (
+            <span style={{ fontSize: 10, color: "var(--tatva-content-tertiary, #888)", fontWeight: 400 }}>
+              {s.meaning}
+            </span>
+          )}
+        </motion.button>
+      ))}
+    </motion.div>
+  );
+}
+
+// --------------- HintCard ---------------
+export function HintCard({
+  goal,
+  suggestions,
+  style,
+}: {
+  goal: string;
+  suggestions: Suggestion[];
+  style?: CSSProperties;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <motion.div
+      layout
+      style={{
+        borderRadius: 16,
+        background: "var(--tatva-surface-secondary, rgba(255,255,255,0.04))",
+        border: "1px solid var(--tatva-border-primary, rgba(255,255,255,0.08))",
+        overflow: "hidden",
+        cursor: "pointer",
+        ...style,
+      }}
+      onClick={() => setExpanded(!expanded)}
+    >
+      <motion.div layout="position" style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--tatva-content-secondary, #aaa)" }}>
+          Need help?
+        </span>
+        <motion.span
+          animate={{ rotate: expanded ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+          style={{ fontSize: 10, color: "var(--tatva-content-tertiary, #888)" }}
+        >
+          ▼
+        </motion.span>
+      </motion.div>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+            style={{ overflow: "hidden" }}
+          >
+            <div style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: "rgba(88,204,2,0.08)",
+                border: "1px solid rgba(88,204,2,0.15)",
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "rgba(88,204,2,0.9)" }}>Goal: </span>
+                <span style={{ fontSize: 11, color: "var(--tatva-content-secondary, #aaa)" }}>{goal}</span>
+              </div>
+
+              {suggestions.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--tatva-content-tertiary, #888)" }}>
+                    Try saying
+                  </span>
+                  {suggestions.map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tatva-content-primary, #fff)" }}>
+                        {s.phrase}
+                      </span>
+                      {s.meaning && (
+                        <span style={{ fontSize: 11, color: "var(--tatva-content-tertiary, #888)" }}>
+                          — {s.meaning}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <span style={{ fontSize: 11, fontStyle: "italic", color: "var(--tatva-content-tertiary, #888)" }}>
+                Tip: Speak slowly — the agent understands partial attempts too
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 

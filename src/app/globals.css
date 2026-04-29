@@ -47,6 +47,35 @@
   50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
 }
 
+/* Transcript panel fade mask at top */
+.transcript-panel {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 15%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%);
+}
+
+/* Mesh sphere ambient glow pulse */
+@keyframes sphereGlow {
+  0%, 100% { filter: drop-shadow(0 0 20px rgba(140, 160, 255, 0.15)); }
+  50% { filter: drop-shadow(0 0 35px rgba(140, 160, 255, 0.3)); }
+}
+.sphere-container {
+  animation: sphereGlow 3s ease-in-out infinite;
+}
+.sphere-container[data-state="speaking"] {
+  animation-name: sphereGlowGreen;
+}
+.sphere-container[data-state="listening"] {
+  animation-name: sphereGlowRed;
+}
+@keyframes sphereGlowGreen {
+  0%, 100% { filter: drop-shadow(0 0 20px rgba(88, 204, 2, 0.15)); }
+  50% { filter: drop-shadow(0 0 40px rgba(88, 204, 2, 0.35)); }
+}
+@keyframes sphereGlowRed {
+  0%, 100% { filter: drop-shadow(0 0 20px rgba(255, 120, 80, 0.15)); }
+  50% { filter: drop-shadow(0 0 35px rgba(255, 120, 80, 0.3)); }
+}
+
 /* Thin branded scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

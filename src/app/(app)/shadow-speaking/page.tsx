@@ -251,8 +251,8 @@ Generate exactly 10 pairs.`,
       const nativeWords = transcript.toLowerCase().split(/\s+/);
       const romanWords = romanizedTranscript.toLowerCase().split(/\s+/);
       const matchCount = refWords.filter((rw: string) =>
-        nativeWords.some((w) => rw.includes(w) || w.includes(rw)) ||
-        romanWords.some((w) => rw.includes(w) || w.includes(rw))
+        nativeWords.some((w: string) => rw.includes(w) || w.includes(rw)) ||
+        romanWords.some((w: string) => rw.includes(w) || w.includes(rw))
       ).length;
       const newScore = Math.min(
         100,

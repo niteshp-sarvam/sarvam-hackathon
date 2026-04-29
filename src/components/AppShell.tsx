@@ -70,7 +70,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <Box
           display="flex"
           direction="column"
-          m={4}
+          m={6}
           grow
           minW="0"
           overflow="hidden"

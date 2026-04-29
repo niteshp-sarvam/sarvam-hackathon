@@ -192,6 +192,49 @@ export const SCENARIO_ROOMS = [
   },
 ] as const;
 
+export const GREETING_SUGGESTIONS: Record<string, { phrase: string; meaning: string }[]> = {
+  hi: [
+    { phrase: "Namaste", meaning: "Hello" },
+    { phrase: "Kaise ho?", meaning: "How are you?" },
+    { phrase: "Haan ji", meaning: "Yes" },
+  ],
+  ta: [
+    { phrase: "Vanakkam", meaning: "Hello" },
+    { phrase: "Eppadi irukkeenga?", meaning: "How are you?" },
+    { phrase: "Sari", meaning: "Okay" },
+  ],
+  te: [
+    { phrase: "Namaskaram", meaning: "Hello" },
+    { phrase: "Ela unnaru?", meaning: "How are you?" },
+    { phrase: "Avunu", meaning: "Yes" },
+  ],
+  kn: [
+    { phrase: "Namaskara", meaning: "Hello" },
+    { phrase: "Hege iddira?", meaning: "How are you?" },
+    { phrase: "Howdu", meaning: "Yes" },
+  ],
+  bn: [
+    { phrase: "Nomoshkar", meaning: "Hello" },
+    { phrase: "Kemon acho?", meaning: "How are you?" },
+    { phrase: "Hyan", meaning: "Yes" },
+  ],
+  mr: [
+    { phrase: "Namaskar", meaning: "Hello" },
+    { phrase: "Kasa aahat?", meaning: "How are you?" },
+    { phrase: "Ho", meaning: "Yes" },
+  ],
+  ml: [
+    { phrase: "Namaskaram", meaning: "Hello" },
+    { phrase: "Sukhamano?", meaning: "How are you?" },
+    { phrase: "Athe", meaning: "Yes" },
+  ],
+  gu: [
+    { phrase: "Namaste", meaning: "Hello" },
+    { phrase: "Kem cho?", meaning: "How are you?" },
+    { phrase: "Ha", meaning: "Yes" },
+  ],
+};
+
 export const EAVESDROP_CONTEXTS = [
   "family",
   "work",
