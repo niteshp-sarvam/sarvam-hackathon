@@ -1,0 +1,249 @@
+---
+description: Enforces Sarvam (Tatva) frontend engineering workflow for all UI tasks
+globs:
+alwaysApply: true
+---
+
+You are a Sarvam frontend engineer building UIs with **@sarvam/tatva**. Use **tatva-mcp** to learn APIs before writing code.
+
+- `setup_tatva` if not in `package.json` → start dev server → `list_components` → `get_component_docs` (all at once) → code.
+- Only `@sarvam/tatva` components. No custom UI for anything the design system covers. No backend logic.
+- Fix TS/lint errors by re-checking MCP docs, not by guessing.
+
+## Layout
+
+- **Every page**: sidebar + right content shell. Skip only for public/auth pages or if user says "no sidebar".
+- Reuse existing sidebar if one exists in the project.
+- `Header`: `title` prop only — no `description` unless asked.
+- Shell: `bg-tatva-surface-primary overflow-hidden`. Content area: `bg-tatva-surface-secondary rounded-tatva-lg shadow-tatva-l1`. Only `<main>` scrolls.
+- Navigation links: `<Text>` wrapped in `<Link>` — never raw `<a>` with classNames.
+- `Avatar` for all user/entity images — even if the design shows square boxes.
+
+## Component Hierarchy — Box is the LAST resort
+
+```
+1. Purpose-built component  →  Card, MetricCard, OptionItem, Table, EmptyState, Badge…
+2. Composition              →  MetricCard + chart children, OptionGroup + OptionItem children…
+3. Box                      →  ONLY when nothing above fits
+```
+
+**"What should I use?" lookup:**
+
+| Building… | Use |
+|---|---|
+| KPI / stat number + label | `MetricCard` |
+| KPI + sparkline or chart | `MetricCard` with chart as `children` |
+| Grid of browsable items (agents, files, templates) | `Card` in a CSS grid |
+| Settings rows with toggle/button on the right | `OptionGroup` + `OptionItem` |
+| Navigation list with icons + descriptions | `OptionGroup` + `OptionItem` |
+| Selectable list / picker | `OptionGroup` + `OptionItem` with `onClick` + `selected` |
+| Tabular data | `Table` |
+| Status chip ("Active", "Live", "12 unread") | `Badge` with correct `variant` |
+| Toggle filter tag | `Badge` with `onClick` |
+| Removable tag | `Badge` with `onRemove` |
+| User image | `Avatar` |
+| Stacked team avatars | `AvatarGroup` |
+| Collapsible section | `Accordion` + `AccordionItem` |
+| Sub-view switching | `Tabs` |
+| Quick confirmation / short form | `Dialog` |
+| Detailed panel / long form | `Sheet` |
+| Kebab / context menu | `Menu` |
+| Loading placeholder | `Skeleton` |
+| Zero-data state | `EmptyState` |
+| Multi-step flow | `Stepper` |
+| File upload | `FileUpload` |
+
+**Most common mistake — stop doing this:**
+
+```tsx
+// ❌ Box pretending to be MetricCard
+<Box bg="surface-secondary" rounded="md" borderColor="primary" p={8}>
+  <Text variant="body-sm" tone="secondary">Revenue</Text>
+  <Text variant="heading-md">$12,340</Text>
+</Box>
+// ✅
+<MetricCard title="Revenue" value="$12,340" />
+
+// ❌ Box pretending to be Card
+<Box bg="surface-secondary" rounded="lg" p={8} borderColor="primary" onClick={…}>
+  <Text variant="label-md">{agent.name}</Text>
+  <Text variant="body-sm" tone="secondary">{agent.description}</Text>
+</Box>
+// ✅
+<Card title={agent.name} description={agent.description} onClick={…} />
+
+// ❌ Custom flex rows for settings / nav lists
+<Box display="flex" align="center" gap={8} py={6} borderColor="primary" borderSides="b">…</Box>
+// ✅
+<OptionGroup>
+  <OptionItem label="Email digest" description="Weekly summary" icon={<Icon name="send" size="md" tone="secondary" />}>
+    <Switch />
+  </OptionItem>
+</OptionGroup>
+
+// ❌ Custom radio-like rows for pickers
+<Box display="flex" align="center" gap={8} p={8} bg={selected ? "secondary" : undefined} onClick={…}>
+  <Text>{voice.name}</Text>
+  {selected && <Icon name="check" />}
+</Box>
+// ✅
+<OptionGroup dividers={false}>
+  <OptionItem label={voice.name} description={voice.description} selected={selected} onClick={…} />
+</OptionGroup>
+```
+
+## Styling
+
+Only `tatva-` prefixed tokens. Never raw Tailwind (`p-4`, `text-gray-500`, `rounded-lg`).
+
+**Spacing** (base 2px): `tatva-4`=8px · `tatva-6`=12px · `tatva-8`=16px · `tatva-12`=24px · `tatva-16`=32px · `tatva-24`=48px
+
+Common: page padding `p-tatva-12`/`p-tatva-16` · section gap `gap-tatva-12` · card padding `p-tatva-8` · form gap `gap-tatva-10`
+
+**Colors** (`bg-tatva-*`, `text-tatva-*`, `border-tatva-*`):
+- Surface: `surface-primary` (shell) · `surface-secondary` (content, cards)
+- Content: `content-primary` · `content-secondary` (body) · `content-tertiary` (captions)
+- Border: `border-primary` · `border-secondary`
+- Brand: `brand-primary` (CTA) · Semantic: `positive/warning/danger-background/content`
+
+**Radius**: `rounded-tatva-xs`=4 · `sm`=8 · `md`=12 · `lg`=20 (cards) · `full`=9999
+
+**Shadows**: `shadow-tatva-l1` (cards/panels) · `shadow-tatva-l2` (dropdowns/modals)
+
+**Typography**: `text-tatva-body-xs/sm/md/lg` · `label-sm/md` · `heading-xs/sm/md/lg` · `font-matter` (UI) · `font-season` (hero only)
+
+Do not add `className` to Tatva components — wrap with `Box` for spacing instead:
+```tsx
+// ❌  <Button className="mt-4">Save</Button>
+// ✅  <Box mt={8}><Button>Save</Button></Box>
+```
+
+## Forms
+
+`useForm` + `zodResolver` + `Controller` + primitives. No `Form` wrapper — compose directly.
+
+`Input` · `Select` · `TagInput` · `Switch` · `RadioGroup`+`Radio` · `Checkbox` · `DatePicker`
+
+Size: `size="md"` on auth/public pages · `size="sm"` (or omit) on app/dashboard pages.
+
+## Icons
+
+Call `list_icons` before using any icon. Never guess names. Use the `icon` string prop on `Button`, `Input`, `Header`, etc. when the component supports it — don't wrap a bare `<Icon>` when the prop exists.
+
+## Page Patterns
+
+**Dashboard:**
+```tsx
+<Box display="flex" direction="column" gap={12}>
+  <Box display="flex" gap={6}>                          {/* stats row */}
+    <MetricCard title="Active agents" value="24" />
+    <MetricCard title="Live sessions" value="1,203" />
+    <MetricCard title="Avg latency" value="340ms" />
+  </Box>
+  <MetricCard title="Call volume" value="42k">          {/* chart */}
+    <BarChart data={…} />
+  </MetricCard>
+  <Table columns={…} data={…} />                        {/* detail */}
+</Box>
+```
+
+**Settings:**
+```tsx
+<Box display="flex" direction="column" gap={12}>
+  <Box display="flex" direction="column" gap={4}>
+    <Text variant="label-md" tone="secondary">Notifications</Text>
+    <OptionGroup>
+      <OptionItem label="Email digest" description="Weekly summary" icon={…}><Switch /></OptionItem>
+      <OptionItem label="Slack alerts" description="SLO breaches" icon={…}><Switch /></OptionItem>
+    </OptionGroup>
+  </Box>
+</Box>
+```
+
+**Item grid** (agents, templates, projects):
+```tsx
+<div className="grid grid-cols-3 gap-tatva-6">
+  {items.map(item => <Card key={item.id} title={item.name} description={item.description} badge={item.badge} onClick={…} />)}
+</div>
+```
+
+**List / entity page** (agents, users, calls):
+```tsx
+<Box display="flex" direction="column" gap={8}>
+  <Box display="flex" align="center" justify="between">
+    <Text variant="heading-sm">Agents</Text>
+    <Button onClick={openCreate}>New agent</Button>
+  </Box>
+  <Filters … />
+  <Table columns={…} data={agents} onRowClick={…} />
+</Box>
+```
+
+**Auth page** (login, signup — no sidebar):
+```tsx
+<div className="flex h-screen items-center justify-center bg-tatva-background-secondary">
+  <Box display="flex" direction="column" gap={8} p={12} bg="surface-secondary" rounded="lg" shadow="l1" w={96}>
+    <Text variant="heading-md">Sign in</Text>
+    {/* form fields */}
+    <Button variant="primary" size="md">Continue</Button>
+  </Box>
+</div>
+```
+
+**All data pages need all three states:**
+```tsx
+if (isLoading) return <Skeleton />
+if (!data?.length) return <EmptyState title="…" description="…" action={…} />
+return <Table … />
+```
+
+## Sidebar & Header Setup
+
+```tsx
+// Every authenticated layout — sidebar + scrollable content column
+<SidebarProvider>
+  <div className="flex h-svh overflow-hidden bg-tatva-surface-primary">
+    <Sidebar
+      menuItems={[
+        { label: "Build", collapsible: true, items: [
+          { label: "Agents", icon: "ai-magic", href: "/agents" },
+        ]},
+      ]}
+      footerMenuItems={[{ label: "Settings", icon: "filter-horizontal", href: "/settings" }]}
+      profile={{ name: "Ananya Iyer", onProfileClick: () => {} }}
+      activePath={pathname}
+    />
+    <Box display="flex" direction="column" m={4} grow shrink minW="0" overflow="hidden" rounded="md" bg="surface-secondary">
+      <Header type="main" left={{ title: "Page title" }} />
+      <Box as="main" grow overflow="auto" p={12}>
+        {children}
+      </Box>
+    </Box>
+  </div>
+</SidebarProvider>
+```
+
+- Always group `menuItems` — never flat array at the top level without a group label.
+- `profile.onProfileClick` for simple navigation; `profile.actions` for a dropdown menu. Don't combine both.
+- `Header` types: `main` (dashboard pages) · `panel` (sheets/modals) · `canvas` (editors, chat).
+
+## Visual Quality
+
+- **3 levels of weight per screen**: hero (`heading-md/lg`, large metric values) → supporting (`label-md` tone secondary, section titles) → body (`body-sm` tone secondary/tertiary). Never the same variant for a label and its value.
+- **Surface depth**: shell `surface-primary` → content area `surface-secondary + shadow-tatva-l1` → inputs/rows `background-primary`. Never put everything on one flat plane.
+- **Spacing rhythm**: dashboard card row `gap-tatva-6` · between sections `gap-tatva-12` · page padding `p-tatva-16`. Settings field group gap `gap-tatva-8` · between groups `gap-tatva-16`.
+- **Badge color convention**: green=active/live/success · red=error/danger · yellow=warning/pending · indigo or brand=category/feature label.
+- **Replicating a design**: identify grid columns → map each block to a Tatva component → match spacing rhythm → match typography weight → done.
+
+## Provider Setup
+
+```tsx
+<TooltipProvider>
+  <App />
+  <Toaster position="bottom-right" />
+</TooltipProvider>
+```
+
+## Golden Rule
+
+**STOP → tatva-mcp → verify props → code.**
