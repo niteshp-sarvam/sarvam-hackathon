@@ -102,9 +102,9 @@ export default function DashboardPage() {
   const seeds = gardenCards.filter((c) => c.gardenStage === "seed").length;
   const sprouts = gardenCards.filter((c) => c.gardenStage === "sprout").length;
 
-  const availableRooms = SCENARIO_ROOMS.filter(
-    (r) => r.language === targetLanguage
-  );
+  // Scenarios are language-agnostic now — every room runs in the user's target
+  // language, so we show all rooms instead of filtering by language.
+  const availableRooms = [...SCENARIO_ROOMS];
 
   const pathComplete = completedLessonCount(foundationLessonIds ?? []);
   const stepperSteps = curriculumStepperSteps();
@@ -558,7 +558,7 @@ export default function DashboardPage() {
                         align="center"
                         gap={3}
                       >
-                        <LangBadge code={room.language} size="sm" />
+                        <LangBadge code={targetLanguage ?? "hi"} size="sm" />
                         <Box display="flex" direction="column" gap={1} grow minW="0">
                           <Text variant="label-md">{room.title}</Text>
                           <Text variant="body-xs" tone="secondary" lineClamp={1}>

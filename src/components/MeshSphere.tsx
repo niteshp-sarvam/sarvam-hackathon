@@ -16,6 +16,8 @@ interface Point3D {
   ox: number;
   oy: number;
   oz: number;
+  phase: number;
+  freq: number;
 }
 
 interface Particle {
@@ -43,7 +45,16 @@ function fibonacciSphere(count: number): Point3D[] {
     const x = Math.sin(phi) * Math.cos(theta);
     const y = Math.sin(phi) * Math.sin(theta);
     const z = Math.cos(phi);
-    points.push({ x, y, z, ox: x, oy: y, oz: z });
+    points.push({
+      x,
+      y,
+      z,
+      ox: x,
+      oy: y,
+      oz: z,
+      phase: Math.random() * Math.PI * 2,
+      freq: 0.7 + Math.random() * 0.8,
+    });
   }
   return points;
 }
@@ -82,10 +93,12 @@ export default function MeshSphere({ state, speakerVolume, micVolume, size = 280
   const smoothMic = useRef(0);
   const rotationY = useRef(0);
   const rotationX = useRef(0.3);
-  const pointsRef = useRef<Point3D[]>(fibonacciSphere(100));
-  const particlesRef = useRef<Particle[]>(createParticles(30));
+  const pointsRef = useRef<Point3D[]>(fibonacciSphere(130));
+  const particlesRef = useRef<Particle[]>(createParticles(36));
   const breathRef = useRef(0);
   const timeRef = useRef(0);
+  const talkPulseRef = useRef(0);
+  const prevAudioRef = useRef(0);
 
   const stateRef = useRef(state);
   const speakerRef = useRef(speakerVolume);
@@ -110,23 +123,33 @@ export default function MeshSphere({ state, speakerVolume, micVolume, size = 280
     const curState = stateRef.current;
     const colors = STATE_COLORS[curState];
 
-    smoothSpeaker.current = lerp(smoothSpeaker.current, speakerRef.current, 0.12);
-    smoothMic.current = lerp(smoothMic.current, micRef.current, 0.12);
+    smoothSpeaker.current = lerp(smoothSpeaker.current, speakerRef.current, 0.32);
+    smoothMic.current = lerp(smoothMic.current, micRef.current, 0.32);
 
     const sv = smoothSpeaker.current;
     const mv = smoothMic.current;
+    const audioLevel = Math.max(sv, mv);
+
+    const audioDelta = Math.max(0, audioLevel - prevAudioRef.current);
+    prevAudioRef.current = audioLevel;
+    talkPulseRef.current = Math.max(talkPulseRef.current * 0.86, audioDelta * 4.5);
+    const talkPulse = Math.min(1, talkPulseRef.current);
 
     const rotSpeed =
-      curState === "speaking" ? 0.006 + sv * 0.012
-      : curState === "listening" ? 0.004 + mv * 0.008
-      : curState === "processing" ? 0.003
-      : 0.002;
+      curState === "processing" ? 0.003
+      : 0.0025 + audioLevel * 0.024 + talkPulse * 0.018;
 
-    rotationY.current += rotSpeed;
+    const wobble = Math.sin(timeRef.current * 1.7) * 0.0008;
+    rotationY.current += rotSpeed + wobble;
+    rotationX.current = 0.28 + Math.sin(timeRef.current * 0.6) * 0.05;
     timeRef.current += 0.016;
-    breathRef.current += curState === "processing" ? 0.04 : 0.015;
+    breathRef.current += curState === "processing" ? 0.04 : 0.018;
 
-    const breathScale = 1 + Math.sin(breathRef.current) * (curState === "processing" ? 0.06 : 0.02);
+    const breathScale =
+      1
+      + Math.sin(breathRef.current) * (curState === "processing" ? 0.06 : 0.025)
+      + audioLevel * 0.10
+      + talkPulse * 0.07;
 
     const cx = w / 2;
     const cy = h / 2;
@@ -149,14 +172,18 @@ export default function MeshSphere({ state, speakerVolume, micVolume, size = 280
 
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
-      let displacement = 0;
-      if (curState === "speaking") {
-        displacement = sv * 0.15 * Math.sin(timeRef.current * 4 + i * 0.5);
-      } else if (curState === "listening") {
-        displacement = mv * 0.12 * Math.sin(timeRef.current * 3 + i * 0.7);
-      } else if (curState === "processing") {
-        displacement = -0.05 + Math.sin(breathRef.current + i * 0.3) * 0.03;
-      }
+      const breathLayer = Math.sin(timeRef.current * 0.8 + p.phase) * 0.022;
+      const slowRipple =
+        audioLevel * 0.14 * Math.sin(timeRef.current * 3.2 * p.freq + i * 0.5 + p.phase);
+      const fastJitter =
+        audioLevel * 0.05 * Math.sin(timeRef.current * 8 + p.phase * 2.3);
+      const radialExpand = audioLevel * 0.16 + talkPulse * 0.13;
+      const procRipple =
+        curState === "processing"
+          ? -0.04 + Math.sin(breathRef.current + i * 0.3) * 0.04
+          : 0;
+      const displacement =
+        breathLayer + slowRipple + fastJitter + radialExpand + procRipple;
 
       const scale = (1 + displacement) * breathScale;
       p.x = p.ox * scale;
@@ -175,8 +202,9 @@ export default function MeshSphere({ state, speakerVolume, micVolume, size = 280
       });
     }
 
-    const edgeThreshold = 0.75;
-    ctx.lineWidth = 0.8;
+    const edgeThreshold = 0.5;
+    ctx.lineWidth = 1.05 + audioLevel * 0.5 + talkPulse * 0.5;
+    const edgeBoost = 1.55 + audioLevel * 1.1 + talkPulse * 0.6;
 
     for (let i = 0; i < points.length; i++) {
       for (let j = i + 1; j < points.length; j++) {
@@ -185,7 +213,7 @@ export default function MeshSphere({ state, speakerVolume, micVolume, size = 280
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dist < edgeThreshold) {
           const avgDepth = (projected[i].depth + projected[j].depth) / 2;
-          const alpha = colors.edgeAlpha * avgDepth * (1 - dist / edgeThreshold);
+          const alpha = Math.min(0.95, colors.edgeAlpha * edgeBoost * avgDepth * (1 - dist / edgeThreshold));
           ctx.strokeStyle = colors.primary.replace(/[\d.]+\)$/, `${alpha})`);
           ctx.beginPath();
           ctx.moveTo(projected[i].x, projected[i].y);
@@ -197,18 +225,18 @@ export default function MeshSphere({ state, speakerVolume, micVolume, size = 280
 
     for (let i = 0; i < projected.length; i++) {
       const pp = projected[i];
-      const dotSize = Math.max(0.2, 1.2 + pp.depth * 1.5);
-      const alpha = Math.max(0.05, 0.3 + pp.depth * 0.5);
+      const dotSize = Math.max(0.6, 1.9 + pp.depth * 1.6 + talkPulse * 0.7);
+      const alpha = Math.max(0.18, 0.55 + pp.depth * 0.45);
       ctx.beginPath();
       ctx.arc(pp.x, pp.y, dotSize, 0, Math.PI * 2);
-      ctx.fillStyle = colors.primary.replace(/[\d.]+\)$/, `${alpha})`);
+      ctx.fillStyle = colors.primary.replace(/[\d.]+\)$/, `${Math.min(1, alpha)})`);
       ctx.fill();
     }
 
     const particles = particlesRef.current;
     for (const pt of particles) {
-      pt.angle += pt.speed;
-      const scatterBoost = curState === "speaking" ? 1 + sv * 0.3 : 1;
+      pt.angle += pt.speed * (1 + audioLevel * 1.8 + talkPulse * 1.2);
+      const scatterBoost = 1 + audioLevel * 0.5 + talkPulse * 0.35;
       const r = pt.radius * baseRadius * scatterBoost;
       const px = cx + Math.cos(pt.angle) * Math.cos(pt.elevation) * r;
       const py = cy + Math.sin(pt.elevation) * r * 0.8;

@@ -5,7 +5,6 @@ import { Box, Header, Icon, Text, Tabs, Badge, Button } from "@sarvam/tatva";
 import { useAppStore } from "@/lib/store";
 import { SCENARIO_ROOMS, SUPPORTED_LANGUAGES } from "@/lib/constants";
 import { useState } from "react";
-import LangBadge from "@/components/LangBadge";
 import {
   StaggerContainer,
   StaggerItem,
@@ -39,6 +38,8 @@ export default function ScenarioRoomsPage() {
   const { targetLanguage, scenarioResults } = useAppStore();
   const [difficulty, setDifficulty] = useState("all");
 
+  const targetLang = SUPPORTED_LANGUAGES.find((l) => l.code === targetLanguage);
+
   const rooms = SCENARIO_ROOMS.filter((r) =>
     difficulty === "all" ? true : r.difficulty === difficulty
   );
@@ -49,11 +50,38 @@ export default function ScenarioRoomsPage() {
         type="main"
         left={{
           title: "Scenario Rooms",
-          subtitle: "Real-life role-play challenges",
+          subtitle: targetLang
+            ? `Practicing in ${targetLang.name} · ${targetLang.nativeName}`
+            : "Real-life role-play challenges",
         }}
       />
 
       <Box display="flex" direction="column" gap={6} grow overflow="auto">
+        {!targetLang && (
+          <FadeIn>
+            <Box
+              p={4}
+              rounded="lg"
+              borderColor="primary"
+              display="flex"
+              align="center"
+              gap={3}
+            >
+              <Icon name="search" size="md" tone="warning" />
+              <Box display="flex" direction="column" gap={1} grow>
+                <Text variant="label-md">No target language set</Text>
+                <Text variant="body-sm" tone="secondary">
+                  Pick a language to learn in Settings — every scenario will
+                  then run in that language.
+                </Text>
+              </Box>
+              <Button variant="primary" size="sm" onClick={() => router.push("/settings")}>
+                Open Settings
+              </Button>
+            </Box>
+          </FadeIn>
+        )}
+
         <Tabs
           value={difficulty}
           onValueChange={setDifficulty}
@@ -67,13 +95,7 @@ export default function ScenarioRoomsPage() {
 
         <StaggerContainer style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {rooms.map((room) => {
-            const lang = SUPPORTED_LANGUAGES.find(
-              (l) => l.code === room.language
-            );
-            const result = scenarioResults.find(
-              (r) => r.roomId === room.id
-            );
-            const isTargetLang = room.language === targetLanguage;
+            const result = scenarioResults.find((r) => r.roomId === room.id);
             const iconName = ROOM_ICONS[room.id] ?? "chat";
             const diff = DIFFICULTY_BADGE[room.difficulty] ?? DIFFICULTY_BADGE.beginner;
 
@@ -106,20 +128,12 @@ export default function ScenarioRoomsPage() {
                     <Icon name={iconName} size="md" tone="secondary" />
                   </div>
                   <Box display="flex" direction="column" gap={1} grow minW="0">
-                    <Box display="flex" align="center" gap={2}>
-                      <Text variant="label-md">{room.title}</Text>
-                      {isTargetLang && (
-                        <Badge variant="brand" size="sm">Your language</Badge>
-                      )}
-                    </Box>
+                    <Text variant="label-md">{room.title}</Text>
                     <Text variant="body-sm" tone="secondary" lineClamp={1}>
                       {room.description}
                     </Text>
                     <Box display="flex" gap={2} align="center">
                       <Badge variant={diff.variant} size="sm">{diff.label}</Badge>
-                      <Text variant="body-xs" tone="tertiary">
-                        {lang?.nativeName ?? room.language}
-                      </Text>
                     </Box>
                   </Box>
                   {result ? (

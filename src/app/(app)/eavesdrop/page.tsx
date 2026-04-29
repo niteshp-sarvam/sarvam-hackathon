@@ -13,7 +13,7 @@ import {
   Loader,
 } from "@sarvam/tatva";
 import { useAppStore } from "@/lib/store";
-import { SUPPORTED_LANGUAGES, EAVESDROP_CONTEXTS, SCENARIO_ROOMS } from "@/lib/constants";
+import { SUPPORTED_LANGUAGES, EAVESDROP_CONTEXTS } from "@/lib/constants";
 import { useRouter } from "next/navigation";
 import {
   StaggerContainer,
@@ -365,14 +365,7 @@ TRANSLATIONS:
                 <Box display="flex" gap={2}>
                   <Button
                     variant="primary"
-                    onClick={() => {
-                      const matchingRoom = SCENARIO_ROOMS.find(
-                        (r) => r.language === targetLanguage
-                      );
-                      router.push(matchingRoom
-                        ? `/scenario-rooms/${matchingRoom.id}`
-                        : "/scenario-rooms");
-                    }}
+                    onClick={() => router.push("/scenario-rooms")}
                   >
                     Open in Scenario Room
                   </Button>
