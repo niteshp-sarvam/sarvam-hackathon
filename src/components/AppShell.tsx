@@ -21,7 +21,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           defaultOpen={false}
           header={{
             logo: "/logo.svg",
-            logoAlt: "BhashaVerse",
+            logoAlt: "Vaani",
           }}
           menuItems={[
             { label: "Dashboard", icon: "home", href: "/dashboard" },

@@ -146,7 +146,7 @@ export default function OnboardingPage() {
           <ScaleIn>
             <Box display="flex" direction="column" align="center" gap={2}>
               <Icon name="chat-multiple" size="lg" tone="brand" />
-              <Text variant="heading-lg">Welcome to BhashaVerse</Text>
+              <Text variant="heading-lg">Welcome to Vaani</Text>
               <Text variant="body-md" tone="secondary" style={{ textAlign: "center" }}>
                 Three quick questions and we&apos;ll tailor your journey.
               </Text>

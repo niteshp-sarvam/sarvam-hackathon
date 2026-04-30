@@ -44,10 +44,10 @@ export default function AuthShell({ children }: { children: ReactNode }) {
               color: "white",
             }}
           >
-            B
+            V
           </div>
           <Text variant="heading-sm" style={{ color: "white" }}>
-            BhashaVerse
+            Vaani
           </Text>
         </Box>
 

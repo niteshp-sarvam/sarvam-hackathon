@@ -12,7 +12,7 @@ import {
 
 export type ThemeMode = "dark" | "light" | "system";
 
-const STORAGE_KEY = "bhashaverse:theme";
+const STORAGE_KEY = "vaani:theme";
 const DEFAULT_MODE: ThemeMode = "dark";
 
 type ThemeContextValue = {

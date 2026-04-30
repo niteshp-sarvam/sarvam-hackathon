@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 /**
- * Registers the BhashaVerse service worker once the page is idle.
+ * Registers the Vaani service worker once the page is idle.
  *
  * - Skipped in development to avoid stale-cache surprises during HMR.
  * - Registered against `/sw.js` so the scope covers the whole app.
