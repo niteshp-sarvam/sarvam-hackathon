@@ -68,12 +68,12 @@
   animation-name: sphereGlowRed;
 }
 @keyframes sphereGlowGreen {
-  0%, 100% { filter: drop-shadow(0 0 20px rgba(88, 204, 2, 0.15)); }
-  50% { filter: drop-shadow(0 0 40px rgba(88, 204, 2, 0.35)); }
+  0%, 100% { filter: drop-shadow(0 0 28px rgba(88, 204, 2, 0.18)); }
+  50% { filter: drop-shadow(0 0 56px rgba(88, 204, 2, 0.4)); }
 }
 @keyframes sphereGlowRed {
-  0%, 100% { filter: drop-shadow(0 0 20px rgba(255, 120, 80, 0.15)); }
-  50% { filter: drop-shadow(0 0 35px rgba(255, 120, 80, 0.3)); }
+  0%, 100% { filter: drop-shadow(0 0 28px rgba(255, 120, 80, 0.18)); }
+  50% { filter: drop-shadow(0 0 50px rgba(255, 120, 80, 0.35)); }
 }
 
 /* Shimmer border animation for CTA card */
@@ -132,3 +132,47 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--tatva-border-secondary, #444); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--tatva-border-primary, #666); }
+
+/* Help-bubble playback speed slider */
+.help-speed-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 130px;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 220, 120, 0.55),
+    rgba(255, 220, 120, 0.18)
+  );
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+.help-speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgb(255, 220, 120);
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.help-speed-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+.help-speed-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgb(255, 220, 120);
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.help-speed-slider::-moz-range-track {
+  height: 4px;
+  background: rgba(255, 220, 120, 0.18);
+  border-radius: 999px;
+}

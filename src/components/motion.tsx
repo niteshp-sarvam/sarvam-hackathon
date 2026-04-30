@@ -16,6 +16,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useCallback,
   forwardRef,
 } from "react";
 
@@ -608,23 +609,782 @@ export function VoiceWaveform({
 }
 
 // --------------- TranscriptPanel ---------------
+interface SuggestionEntry {
+  phrase: string;
+  meaning: string;
+}
+
 interface TranscriptMessage {
   role: "user" | "assistant";
   content: string;
+  suggestions?: SuggestionEntry[];
+}
+
+interface MessageBubbleProps {
+  message: TranscriptMessage;
+  index: number;
+  userLabel: string;
+  agentLabel: string;
+  targetLanguageCode?: string;
+  nativeLanguageCode?: string;
+  targetLanguageLabel?: string;
+  nativeLanguageLabel?: string;
+  translationCache: Map<string, string>;
+  audioCache: Map<string, string>;
+  helpCache: Map<string, SuggestionEntry[]>;
+  scenarioContext?: string;
+}
+
+// Robustly parse suggestions from a noisy LLM response. Tries several formats:
+// 1) [SUGGEST:phrase (meaning)|...] marker (preferred)
+// 2) JSON array of {phrase, meaning}
+// 3) Numbered/bulleted lines with "phrase (meaning)" or "phrase - meaning"
+function parseLooseSuggestions(raw: string): SuggestionEntry[] {
+  const cleaned = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think[^>]*>/gi, "")
+    .replace(/```json|```/g, "")
+    .trim();
+
+  const fromSegment = (seg: string): SuggestionEntry => {
+    const t = seg.replace(/^["'`]+|["'`]+$/g, "").trim();
+    const paren = t.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+    if (paren) return { phrase: paren[1].trim(), meaning: paren[2].trim() };
+    const dash = t.match(/^(.+?)\s*[-–—:|]\s*(.{2,})$/);
+    if (dash) return { phrase: dash[1].trim(), meaning: dash[2].trim() };
+    return { phrase: t, meaning: "" };
+  };
+
+  // 1) Try every [...] bracket block. The model sometimes localizes the marker
+  //    word (e.g. [सुझाव:...] instead of [SUGGEST:...]) or drops the prefix.
+  const bracketBlocks = Array.from(cleaned.matchAll(/\[([^\[\]]+)\]/g));
+  for (const m of bracketBlocks) {
+    let inner = m[1];
+    // strip a leading "WORD:" prefix if present (only if it doesn't contain | or ( )
+    inner = inner.replace(/^[^|()\[\]]{1,40}:\s*/, "");
+    // must look like pipe-separated entries
+    if (!inner.includes("|")) continue;
+    const out = inner
+      .split("|")
+      .map(fromSegment)
+      .filter((e) => e.phrase.length > 0);
+    if (out.length >= 2) return out;
+  }
+
+  // 2) JSON array
+  const jsonMatch = cleaned.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+  if (jsonMatch) {
+    try {
+      const arr = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(arr)) {
+        const out: SuggestionEntry[] = [];
+        for (const it of arr) {
+          if (it && typeof it.phrase === "string" && it.phrase.trim()) {
+            out.push({
+              phrase: it.phrase.trim(),
+              meaning: typeof it.meaning === "string" ? it.meaning.trim() : "",
+            });
+          }
+        }
+        if (out.length > 0) return out;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 3) numbered / bulleted lines
+  const lines = cleaned
+    .split(/\r?\n/)
+    .map((l) =>
+      l
+        .replace(/^\s*\d+[\.\)]\s*/, "")
+        .replace(/^\s*[-•*]\s*/, "")
+        .trim()
+    )
+    .filter((l) => l.length > 0 && l.length < 240 && !l.startsWith("[") && !l.startsWith("{"));
+
+  const out: SuggestionEntry[] = [];
+  for (const line of lines) {
+    const seg = fromSegment(line);
+    if (seg.phrase && seg.phrase.length < 120) out.push(seg);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+function MessageBubble({
+  message,
+  index,
+  userLabel,
+  agentLabel,
+  targetLanguageCode,
+  nativeLanguageCode,
+  targetLanguageLabel,
+  nativeLanguageLabel,
+  translationCache,
+  audioCache,
+  helpCache,
+  scenarioContext,
+}: MessageBubbleProps) {
+  const isUser = message.role === "user";
+  // For agent: source = target language, output = native language (let learner read meaning).
+  // For user:  source = native language, output = target language (show what they "should" have said).
+  const fromLang = isUser ? nativeLanguageCode : targetLanguageCode;
+  const toLang = isUser ? targetLanguageCode : nativeLanguageCode;
+  const toLabel = isUser ? targetLanguageLabel : nativeLanguageLabel;
+
+  const cacheKey = `${fromLang}:${toLang}:${message.content}`;
+  const initialTranslation = translationCache.get(cacheKey) ?? null;
+
+  const [expanded, setExpanded] = useState(false);
+  const [translation, setTranslation] = useState<string | null>(initialTranslation);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [helpExpanded, setHelpExpanded] = useState(false);
+  const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const [audioLoadingKey, setAudioLoadingKey] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
+
+  const helpCacheKey = `${targetLanguageCode ?? ""}|${message.content}`;
+  const initialSuggestions =
+    message.suggestions && message.suggestions.length > 0
+      ? message.suggestions
+      : helpCache.get(helpCacheKey) ?? null;
+  const [suggestionsState, setSuggestionsState] = useState<SuggestionEntry[] | null>(
+    initialSuggestions
+  );
+  const [helpLoading, setHelpLoading] = useState(false);
+  const [helpError, setHelpError] = useState<string | null>(null);
+
+  const canHelp =
+    !isUser && Boolean(targetLanguageCode) && message.content.trim().length > 0;
+
+  const ensureSuggestions = useCallback(async () => {
+    if (suggestionsState && suggestionsState.length > 0) return;
+    if (helpLoading || !targetLanguageCode) return;
+    const cached = helpCache.get(helpCacheKey);
+    if (cached && cached.length > 0) {
+      setSuggestionsState(cached);
+      return;
+    }
+    setHelpLoading(true);
+    setHelpError(null);
+    const targetName = targetLanguageLabel ?? targetLanguageCode;
+    const nativeName = nativeLanguageLabel ?? "English";
+    const sysPrompt = `You help a language learner respond in ${targetName}. The conversation partner is: ${
+      scenarioContext ?? "a native speaker"
+    }. They just said: "${message.content}".
+
+Generate exactly 3 short, natural reply suggestions the learner could say back in ${targetName}. Vary the tone (polite, casual, clarifying). Each reply must be 3-12 words.
+
+Output ONLY ONE LINE in this exact format and nothing else, no explanation, no reasoning, no markdown:
+[SUGGEST:phrase1 (meaning1)|phrase2 (meaning2)|phrase3 (meaning3)]
+
+Rules:
+- Each "phrase" MUST be written in the NATIVE ${targetName} script (e.g. Devanagari for Hindi, Tamil script for Tamil, Bengali script for Bengali). Do NOT use Romanized / Latin transliteration.
+- Each "meaning" MUST be the short ${nativeName} translation in parentheses.
+- Do NOT mix scripts inside a single phrase. Use only ${targetName} for phrases.
+
+Example for target=Hindi, native=English: [SUGGEST:कितना है? (How much?)|बहुत महंगा है (Too expensive)|ठीक है (Okay)]`;
+
+    const tryOnce = async (temperature: number): Promise<SuggestionEntry[]> => {
+      const res = await fetch("/api/sarvam/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: sysPrompt },
+            {
+              role: "user",
+              content:
+                "Output ONLY the [SUGGEST:...] marker line for this turn. No reasoning, no other text.",
+            },
+          ],
+          temperature,
+          max_tokens: 1200,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Help failed");
+      const raw: string =
+        data?.choices?.[0]?.message?.content ?? data?.output ?? "";
+      return parseLooseSuggestions(raw);
+    };
+
+    try {
+      let cleaned = await tryOnce(0.3);
+      if (cleaned.length === 0) cleaned = await tryOnce(0.65);
+      cleaned = cleaned.slice(0, 3);
+      if (cleaned.length === 0) throw new Error("No suggestions returned");
+      helpCache.set(helpCacheKey, cleaned);
+      setSuggestionsState(cleaned);
+    } catch (e) {
+      setHelpError(e instanceof Error ? e.message : "Could not generate suggestions");
+    } finally {
+      setHelpLoading(false);
+    }
+  }, [
+    suggestionsState,
+    helpLoading,
+    targetLanguageCode,
+    helpCache,
+    helpCacheKey,
+    targetLanguageLabel,
+    nativeLanguageLabel,
+    scenarioContext,
+    message.content,
+  ]);
+
+  // Pre-fetch the TTS audio for a phrase and stash it in the shared cache.
+  const ensureAudioCached = useCallback(
+    async (phrase: string): Promise<string | undefined> => {
+      if (!targetLanguageCode || !phrase) return undefined;
+      const key = `${targetLanguageCode}|${phrase}`;
+      const existing = audioCache.get(key);
+      if (existing) return existing;
+      try {
+        const res = await fetch("/api/sarvam/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: phrase,
+            target_language_code: `${targetLanguageCode}-IN`,
+          }),
+        });
+        const data = await res.json();
+        const base64: string | undefined = data?.audios?.[0];
+        if (!base64) return undefined;
+        const audioUrl = `data:audio/wav;base64,${base64}`;
+        audioCache.set(key, audioUrl);
+        return audioUrl;
+      } catch {
+        return undefined;
+      }
+    },
+    [targetLanguageCode, audioCache]
+  );
+
+  function toggleHelp() {
+    const next = !helpExpanded;
+    setHelpExpanded(next);
+    if (next) ensureSuggestions();
+  }
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  // Live update playbackRate while audio is playing (slider drag)
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  async function playPhrase(phrase: string, rate: number, key: string) {
+    if (!targetLanguageCode) return;
+    // toggle: clicking same key while it's already playing = stop
+    if (playingKey === key && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setPlayingKey(null);
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    let audioUrl = audioCache.get(`${targetLanguageCode}|${phrase}`);
+    if (!audioUrl) {
+      setAudioLoadingKey(key);
+      audioUrl = await ensureAudioCached(phrase);
+      setAudioLoadingKey(null);
+      if (!audioUrl) {
+        console.error("[TTS] Failed to fetch audio for phrase");
+        return;
+      }
+    }
+    const audio = new Audio(audioUrl);
+    audio.playbackRate = rate;
+    audioRef.current = audio;
+    setPlayingKey(key);
+    audio.onended = () => {
+      if (audioRef.current === audio) audioRef.current = null;
+      setPlayingKey((cur) => (cur === key ? null : cur));
+    };
+    audio.onerror = () => {
+      if (audioRef.current === audio) audioRef.current = null;
+      setPlayingKey((cur) => (cur === key ? null : cur));
+    };
+    try {
+      await audio.play();
+    } catch (e) {
+      console.error("[TTS] play failed:", e);
+      setPlayingKey((cur) => (cur === key ? null : cur));
+    }
+  }
+
+  const canTranslate =
+    Boolean(fromLang && toLang && fromLang !== toLang) && message.content.trim().length > 0;
+
+  const loadTranslation = useCallback(async () => {
+    if (!canTranslate) return;
+    if (translation) return;
+    const cached = translationCache.get(cacheKey);
+    if (cached) {
+      setTranslation(cached);
+      return;
+    }
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sarvam/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: message.content,
+          source_language_code: fromLang,
+          target_language_code: toLang,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Translate failed");
+      const out: string =
+        data.translated_text ?? data.output ?? data.translation ?? "";
+      if (!out) throw new Error("Empty translation");
+      translationCache.set(cacheKey, out);
+      setTranslation(out);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Translation failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    canTranslate,
+    translation,
+    loading,
+    translationCache,
+    cacheKey,
+    message.content,
+    fromLang,
+    toLang,
+  ]);
+
+  function handleToggle() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) loadTranslation();
+  }
+
+  // Prefetch on mount: translation, suggestions (assistant only), audios.
+  // We don't wait for the user to click — everything is ready by the time they ask.
+  useEffect(() => {
+    if (canTranslate) loadTranslation();
+    if (canHelp) ensureSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // As soon as suggestions are available (whether prefetched or freshly generated),
+  // prefetch TTS audio for each phrase so the play button is instant.
+  useEffect(() => {
+    if (!suggestionsState || suggestionsState.length === 0) return;
+    for (const s of suggestionsState) {
+      if (s.phrase) ensureAudioCached(s.phrase).catch(() => {});
+    }
+  }, [suggestionsState, ensureAudioCached]);
+
+  return (
+    <motion.div
+      layout
+      initial={{
+        opacity: 0,
+        y: 16,
+        x: isUser ? 20 : -20,
+        scale: 0.95,
+      }}
+      animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 350, damping: 28 }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isUser ? "flex-end" : "flex-start",
+        gap: 4,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          color: "rgba(255,255,255,0.6)",
+          padding: "0 6px",
+        }}
+      >
+        {isUser ? userLabel : agentLabel}
+      </span>
+      <div
+        style={{
+          maxWidth: "82%",
+          padding: "10px 16px",
+          borderRadius: isUser ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+          background: isUser
+            ? "linear-gradient(135deg, rgba(88,204,2,0.95), rgba(60,170,0,0.95))"
+            : "var(--tatva-surface-secondary, rgba(255,255,255,0.07))",
+          backdropFilter: "blur(8px)",
+          border: !isUser
+            ? "1px solid var(--tatva-border-primary, rgba(255,255,255,0.1))"
+            : "none",
+          boxShadow: isUser
+            ? "0 2px 12px rgba(88,204,2,0.18)"
+            : "0 2px 8px rgba(0,0,0,0.18)",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 14.5,
+            lineHeight: 1.55,
+            color: "#fff",
+            wordBreak: "break-word",
+          }}
+        >
+          {message.content}
+        </span>
+      </div>
+      {(canTranslate || canHelp) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+          {canTranslate && (
+            <button
+              type="button"
+              onClick={handleToggle}
+              aria-expanded={expanded}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: "2px 6px",
+                color: "rgba(255,255,255,0.7)",
+                fontSize: 11.5,
+                fontWeight: 500,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <motion.span
+                animate={{ rotate: expanded ? 90 : 0 }}
+                transition={{ duration: 0.18 }}
+                style={{ display: "inline-block", lineHeight: 1 }}
+              >
+                ▸
+              </motion.span>
+              {expanded ? "Hide" : "Show"} in {toLabel ?? "translation"}
+            </button>
+          )}
+          {canHelp && (
+            <button
+              type="button"
+              onClick={toggleHelp}
+              aria-expanded={helpExpanded}
+              style={{
+                background: helpExpanded ? "rgba(255,200,0,0.14)" : "rgba(255,200,0,0.06)",
+                border: "1px solid rgba(255,200,0,0.45)",
+                padding: "2px 8px",
+                borderRadius: 999,
+                color: "rgba(255,220,120,0.95)",
+                fontSize: 11.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <motion.span
+                animate={{ rotate: helpExpanded ? 90 : 0 }}
+                transition={{ duration: 0.18 }}
+                style={{ display: "inline-block", lineHeight: 1 }}
+              >
+                ▸
+              </motion.span>
+              {helpExpanded ? "Hide help" : "Help me reply"}
+            </button>
+          )}
+        </div>
+      )}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key={`tx-${index}`}
+            initial={{ opacity: 0, height: 0, y: -4 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -4 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            style={{ overflow: "hidden", maxWidth: "82%", width: "100%" }}
+          >
+            <div
+              style={{
+                marginTop: 2,
+                padding: "8px 14px",
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px dashed rgba(255,255,255,0.18)",
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: "rgba(255,255,255,0.88)",
+                fontStyle: loading || error ? "italic" : "normal",
+                alignSelf: isUser ? "flex-end" : "flex-start",
+              }}
+            >
+              {loading && "Translating…"}
+              {error && !loading && `Couldn't translate: ${error}`}
+              {translation && !loading && !error && translation}
+              {!loading && !error && !translation && "—"}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence initial={false}>
+        {helpExpanded && canHelp && (
+          <motion.div
+            key={`help-${index}`}
+            initial={{ opacity: 0, height: 0, y: -4 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -4 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            style={{ overflow: "hidden", maxWidth: "82%", width: "100%" }}
+          >
+            <div
+              style={{
+                marginTop: 4,
+                padding: "10px 12px",
+                borderRadius: 14,
+                background: "rgba(255,200,0,0.06)",
+                border: "1px solid rgba(255,200,0,0.25)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  color: "rgba(255,220,120,0.9)",
+                }}
+              >
+                Try saying back
+              </span>
+              {helpLoading && (
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    color: "rgba(255,255,255,0.7)",
+                    fontStyle: "italic",
+                  }}
+                >
+                  Curating replies…
+                </span>
+              )}
+              {helpError && !helpLoading && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 12.5, color: "rgba(255,180,180,0.9)" }}>
+                    Couldn&apos;t generate suggestions: {helpError}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHelpError(null);
+                      ensureSuggestions();
+                    }}
+                    style={{
+                      alignSelf: "flex-start",
+                      padding: "3px 10px",
+                      borderRadius: 999,
+                      fontSize: 11.5,
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {(suggestionsState ?? []).length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "4px 4px 2px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: 0.3,
+                      textTransform: "uppercase",
+                      color: "rgba(255,220,120,0.85)",
+                    }}
+                  >
+                    Speed
+                  </span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={1.5}
+                    step={0.05}
+                    value={playbackRate}
+                    onChange={(e) => setPlaybackRate(parseFloat(e.target.value))}
+                    className="help-speed-slider"
+                    aria-label="Playback speed"
+                  />
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#fff",
+                      minWidth: 38,
+                      textAlign: "right",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {playbackRate.toFixed(2)}×
+                  </span>
+                </div>
+              )}
+              {(suggestionsState ?? []).map((s, idx) => {
+                const baseKey = `${index}-sugg-${idx}`;
+                const playKey = baseKey;
+                const isPlaying = playingKey === playKey;
+                const isLoading = audioLoadingKey === playKey;
+                return (
+                  <div
+                    key={baseKey}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => playPhrase(s.phrase, playbackRate, playKey)}
+                      disabled={isLoading}
+                      aria-label={isPlaying ? "Stop" : "Play"}
+                      style={{
+                        flexShrink: 0,
+                        width: 32,
+                        height: 32,
+                        borderRadius: "50%",
+                        border: "1px solid rgba(255,220,120,0.5)",
+                        background: isPlaying
+                          ? "rgba(88,204,2,0.28)"
+                          : "rgba(255,220,120,0.14)",
+                        color: "#fff",
+                        cursor: isLoading ? "wait" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 13,
+                        opacity: isLoading ? 0.7 : 1,
+                        transition: "background 0.15s",
+                      }}
+                    >
+                      {isLoading ? "…" : isPlaying ? "■" : "▶"}
+                    </button>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                        minWidth: 0,
+                        flex: 1,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 14.5,
+                          fontWeight: 600,
+                          color: "#fff",
+                          lineHeight: 1.4,
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {s.phrase}
+                      </span>
+                      {s.meaning && (
+                        <span
+                          style={{
+                            fontSize: 12.5,
+                            color: "rgba(255,255,255,0.7)",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {s.meaning}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
 }
 
 export function TranscriptPanel({
   messages,
   isAssistantSpeaking,
+  userLabel = "You",
+  agentLabel = "AI Tutor",
+  targetLanguageCode,
+  nativeLanguageCode,
+  targetLanguageLabel,
+  nativeLanguageLabel,
+  scenarioContext,
   className,
   style,
 }: {
   messages: TranscriptMessage[];
   isAssistantSpeaking?: boolean;
+  userLabel?: string;
+  agentLabel?: string;
+  targetLanguageCode?: string;
+  nativeLanguageCode?: string;
+  targetLanguageLabel?: string;
+  nativeLanguageLabel?: string;
+  scenarioContext?: string;
   className?: string;
   style?: CSSProperties;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const translationCacheRef = useRef<Map<string, string>>(new Map());
+  const audioCacheRef = useRef<Map<string, string>>(new Map());
+  const helpCacheRef = useRef<Map<string, SuggestionEntry[]>>(new Map());
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -636,56 +1396,42 @@ export function TranscriptPanel({
       ref={scrollRef}
       className={`transcript-panel ${className ?? ""}`}
       style={{
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "flex-end",
+        display: "block",
         overflowY: "auto",
+        overflowX: "hidden",
         minHeight: 0,
+        WebkitOverflowScrolling: "touch",
         ...style,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 16px" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          padding: "14px 18px 8px",
+          minHeight: "100%",
+          marginTop: "auto",
+          boxSizing: "border-box",
+        }}
+      >
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => (
-            <motion.div
+            <MessageBubble
               key={`${i}-${msg.role}`}
-              layout
-              initial={{
-                opacity: 0,
-                y: 16,
-                x: msg.role === "user" ? 20 : -20,
-                scale: 0.95,
-              }}
-              animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
-              transition={{ type: "spring", stiffness: 350, damping: 28 }}
-              style={{
-                display: "flex",
-                justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
-              }}
-            >
-              <div
-                style={{
-                  maxWidth: "80%",
-                  padding: "8px 14px",
-                  borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                  background: msg.role === "user"
-                    ? "linear-gradient(135deg, rgba(88,204,2,0.9), rgba(60,170,0,0.9))"
-                    : "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
-                  backdropFilter: "blur(8px)",
-                  border: msg.role === "assistant" ? "1px solid var(--tatva-border-primary, rgba(255,255,255,0.08))" : "none",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                    color: msg.role === "user" ? "#fff" : "var(--tatva-content-primary, #fff)",
-                  }}
-                >
-                  {msg.content}
-                </span>
-              </div>
-            </motion.div>
+              message={msg}
+              index={i}
+              userLabel={userLabel}
+              agentLabel={agentLabel}
+              targetLanguageCode={targetLanguageCode}
+              nativeLanguageCode={nativeLanguageCode}
+              targetLanguageLabel={targetLanguageLabel}
+              nativeLanguageLabel={nativeLanguageLabel}
+              translationCache={translationCacheRef.current}
+              audioCache={audioCacheRef.current}
+              helpCache={helpCacheRef.current}
+              scenarioContext={scenarioContext}
+            />
           ))}
         </AnimatePresence>
 

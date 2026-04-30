@@ -62,8 +62,10 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
         body: JSON.stringify({
           model: this.options.model ?? DEFAULT_MODEL,
           messages,
+          // Lowered defaults: scenarios want tight, alive 1-3 sentence replies.
+          // Old defaults (0.7 / 1024) encouraged the model to monologue.
           temperature: this.options.temperature ?? 0.7,
-          max_tokens: this.options.maxTokens ?? 1024,
+          max_tokens: this.options.maxTokens ?? 220,
           reasoning_effort: null,
           stream: true,
         }),
@@ -84,6 +86,37 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       let fullMessage = "";
       let buffer = "";
       let insideThink = false;
+      // Bracket filter state — suppresses `[...]` markers (e.g. [SUGGEST:...],
+      // [STARS:N], [SCENARIO_COMPLETE]) from the TTS stream so the agent doesn't
+      // read them aloud. Markers may span chunk boundaries.
+      let insideBracket = false;
+      let bracketBuf = "";
+      const MAX_BRACKET_LEN = 320;
+
+      const writeToTTS = (raw: string) => {
+        if (!raw) return;
+        let out = "";
+        for (const ch of raw) {
+          if (insideBracket) {
+            bracketBuf += ch;
+            if (ch === "]") {
+              // bracket closed — drop the buffered marker content entirely
+              insideBracket = false;
+              bracketBuf = "";
+            } else if (bracketBuf.length > MAX_BRACKET_LEN) {
+              // bracket never closed — abandon suppression to avoid stalling
+              insideBracket = false;
+              bracketBuf = "";
+            }
+          } else if (ch === "[") {
+            insideBracket = true;
+            bracketBuf = "[";
+          } else {
+            out += ch;
+          }
+        }
+        if (out) stream.write(out);
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -124,12 +157,12 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
                 if (startIdx !== -1) {
                   insideThink = true;
                   const before = text.slice(0, startIdx);
-                  if (before) stream.write(before);
+                  if (before) writeToTTS(before);
                   text = "";
                 }
               }
               if (!insideThink && text) {
-                stream.write(text);
+                writeToTTS(text);
               }
             }
           } catch {
@@ -145,8 +178,10 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
           const content = parsed.choices?.[0]?.message?.content ?? "";
           if (content) {
             fullMessage = content;
-            const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-            if (cleaned) stream.write(cleaned);
+            const cleaned = content
+              .replace(/<think>[\s\S]*?<\/think>/g, "")
+              .trim();
+            if (cleaned) writeToTTS(cleaned);
           }
         } catch {
           // not parseable

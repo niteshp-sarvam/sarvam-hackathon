@@ -26,16 +26,31 @@ export interface ScenarioPromptConfig {
   openingStyle?: string;
 }
 
+// A short ordered checklist the agent should drive the learner through.
+// Each entry is one human-readable goal — written in English (the meta-language
+// of the platform) but the conversation itself runs in any of the 8 supported
+// target languages. The agent emits [SUBGOAL:1], [SUBGOAL:2]… as each is hit.
+export type SubGoal = string;
+
+// Scenarios are language-agnostic templates. The conversation runs in whatever
+// `targetLanguage` the user has chosen in settings. Personas keep their character
+// traits but no longer reference any specific city or language.
 export const SCENARIO_ROOMS = [
   {
     id: "chennai-market",
-    title: "Chennai Market Haggle",
-    language: "ta" as LanguageCode,
-    description: "Negotiate vegetable prices at a busy Chennai market",
+    title: "Market Haggle",
+    description: "Negotiate vegetable prices at a busy morning market",
     goal: "Get total bill under ₹200",
     difficulty: "beginner" as const,
     persona: "Stubborn vegetable vendor who loves to overcharge tourists",
-    setting: "T. Nagar Ranganathan Street morning market",
+    setting: "A busy morning vegetable market",
+    scene:
+      "It's 7 AM. You're crouched behind your tarp, surrounded by pyramids of tomatoes, brinjals, and green chillies. The smell of crushed coriander hangs in the air, your brass weighing scale clinks as customers shuffle past. The learner has just walked up and is eyeing your tomatoes.",
+    subGoals: [
+      "Greet the vendor and ask the price of at least one item",
+      "Counter-offer or negotiate a lower price",
+      "Agree on a final total under ₹200 and close the deal",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -46,13 +61,19 @@ export const SCENARIO_ROOMS = [
   },
   {
     id: "bengaluru-auto",
-    title: "Bengaluru Auto Rickshaw",
-    language: "kn" as LanguageCode,
+    title: "Auto Rickshaw Ride",
     description: "Convince an auto driver to use the meter",
     goal: "Get the driver to agree to meter fare",
     difficulty: "beginner" as const,
     persona: "Impatient auto driver who prefers fixed fares",
-    setting: "Majestic bus stand, rush hour",
+    setting: "A busy bus stand at rush hour",
+    scene:
+      "It's evening rush hour. Your auto is parked at a busy bus stand, engine idling. You've already turned down two passengers asking for the meter. You're checking your phone, one foot dangling out, when the learner walks up to your auto window.",
+    subGoals: [
+      "Tell the driver your destination",
+      "Push back when the driver refuses the meter or asks for fixed fare",
+      "Get the driver to agree to use the meter (or a fair fixed fare)",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -62,45 +83,63 @@ export const SCENARIO_ROOMS = [
   },
   {
     id: "mumbai-dabba",
-    title: "Mumbai Dabba Service",
-    language: "mr" as LanguageCode,
+    title: "Tiffin Lunch Order",
     description: "Order a custom tiffin with specific dietary restrictions",
-    goal: "Successfully order a vegetarian dabba with no onion/garlic",
+    goal: "Successfully order a vegetarian tiffin with no onion/garlic",
     difficulty: "intermediate" as const,
-    persona: "Efficient dabba service coordinator who speaks fast Marathi",
-    setting: "Local dabba service office in Dadar",
+    persona: "Efficient tiffin service coordinator who speaks rapidly",
+    setting: "A neighborhood tiffin / dabba service office",
+    scene:
+      "You sit at the small front desk of the dabba service, a thick order book open in front of you. Two phones ring constantly. A delivery boy waits in the corner for the next batch of tiffin numbers. The learner has just walked in for the first time, looking a little lost.",
+    subGoals: [
+      "Introduce yourself and say you want to order a daily tiffin",
+      "Specify dietary restrictions clearly (vegetarian, no onion, no garlic)",
+      "Confirm the schedule, address, and price for the order",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 10,
       nativeTolerance: "medium",
       formality: "polite",
-      characterQuirks: "Speaks rapidly and uses lots of Marathi food terms. Asks clarifying questions. Very businesslike but warm once order is confirmed.",
+      characterQuirks: "Speaks rapidly and uses lots of food terms. Asks clarifying questions. Very businesslike but warm once order is confirmed.",
     } as ScenarioPromptConfig,
   },
   {
     id: "kolkata-puja",
-    title: "Kolkata Durga Puja",
-    language: "bn" as LanguageCode,
-    description: "Navigate pandal hopping by asking directions in Bengali",
+    title: "Festival Pandal Hopping",
+    description: "Navigate festival pandals by asking directions",
     goal: "Visit 3 pandals and learn their themes",
     difficulty: "intermediate" as const,
     persona: "Helpful elderly local who gives detailed directions",
-    setting: "South Kolkata during Durga Puja festivities",
+    setting: "A neighborhood during a major festival with decorated pandals",
+    scene:
+      "You're an elderly local sitting on a low stool outside your gate, sipping tea from a clay kulhar. The neighbourhood is packed with festive lights and the steady thud of dhak drums. A visitor (the learner) approaches and folds their hands respectfully, asking for directions.",
+    subGoals: [
+      "Greet the elderly local respectfully and ask for directions to the first pandal",
+      "Ask about the theme or significance of at least one pandal",
+      "Ask about a second or third pandal to visit",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 12,
       nativeTolerance: "medium",
       formality: "polite",
-      characterQuirks: "Tells little stories about each pandal. Uses Bengali cultural references freely. Occasionally gets sidetracked reminiscing about past Pujas.",
+      characterQuirks: "Tells little stories about each pandal. Shares cultural references freely. Occasionally gets sidetracked reminiscing about past festivals.",
     } as ScenarioPromptConfig,
   },
   {
     id: "hyderabad-biryani",
-    title: "Hyderabad Biryani Order",
-    language: "te" as LanguageCode,
+    title: "Restaurant Biryani Order",
     description: "Customize a biryani order at a busy restaurant",
-    goal: "Order biryani with correct spice level and sides in Telugu",
+    goal: "Order biryani with correct spice level and sides",
     difficulty: "beginner" as const,
-    persona: "Busy restaurant waiter who speaks rapid Telugu",
-    setting: "Paradise Restaurant, Secunderabad",
+    persona: "Busy restaurant waiter who speaks rapidly",
+    setting: "A popular biryani restaurant during dinner rush",
+    scene:
+      "You're a waiter at a packed biryani restaurant. The kitchen door swings open every few seconds, plates clatter, the smell of saffron and fried onions fills the air. You hold a small notepad and a pen. The learner has just sat down at table 12 and is scanning the menu.",
+    subGoals: [
+      "Place a clear biryani order (chicken / mutton / veg)",
+      "Specify spice level (mild / medium / spicy)",
+      "Add at least one side or drink to complete the order",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -110,13 +149,19 @@ export const SCENARIO_ROOMS = [
   },
   {
     id: "ahmedabad-chai",
-    title: "Ahmedabad Chai Stall",
-    language: "gu" as LanguageCode,
+    title: "Tea Stall Chat",
     description: "Order chai and snacks while making small talk",
     goal: "Order for a group of 4 with different preferences",
     difficulty: "beginner" as const,
-    persona: "Friendly chaiwala who loves to chat",
-    setting: "Famous chai stall near Law Garden",
+    persona: "Friendly chai stall owner who loves to chat",
+    setting: "A popular neighborhood tea stall in the evening",
+    scene:
+      "You stand behind your tea stall, stirring a steaming pot of milky chai with a long ladle. The evening crowd buzzes — auto drivers on a break, college students, an old uncle reading the newspaper. The learner has just arrived with friends and is waiting at the counter.",
+    subGoals: [
+      "Greet the chai-walla and place an order for chai",
+      "Order at least one snack item",
+      "Customise the order for a group of 4 with different preferences",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -126,13 +171,19 @@ export const SCENARIO_ROOMS = [
   },
   {
     id: "delhi-metro",
-    title: "Delhi Metro Directions",
-    language: "hi" as LanguageCode,
-    description: "Ask for help navigating the Delhi Metro in Hindi",
-    goal: "Get directions from Rajiv Chowk to Chandni Chowk and find the right exit",
+    title: "Metro Directions",
+    description: "Ask for help navigating the metro",
+    goal: "Get directions to a major station and find the right exit",
     difficulty: "beginner" as const,
     persona: "Helpful fellow commuter who knows the metro inside-out",
-    setting: "Rajiv Chowk Metro station during evening rush",
+    setting: "A busy metro station during evening rush",
+    scene:
+      "You're standing on the metro platform during evening rush, waiting for the next train. Earbuds half-in, knapsack on your back, you're a regular commuter who knows every line. The learner walks up looking confused, holding a phone with a map open.",
+    subGoals: [
+      "Ask for directions to a specific station",
+      "Confirm which line and direction to take",
+      "Ask about which exit or coach is best for the destination",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -142,30 +193,42 @@ export const SCENARIO_ROOMS = [
   },
   {
     id: "jaipur-haveli",
-    title: "Jaipur Heritage Walk",
-    language: "hi" as LanguageCode,
-    description: "Take a guided tour of a Jaipur haveli and ask questions in Hindi",
+    title: "Heritage Haveli Tour",
+    description: "Take a guided tour of a heritage haveli and ask questions",
     goal: "Learn the history of the haveli and bargain for souvenirs",
     difficulty: "advanced" as const,
-    persona: "Proud haveli owner who speaks formal, literary Hindi",
-    setting: "A 300-year-old haveli in the walled city of Jaipur",
+    persona: "Proud heritage haveli owner who speaks formally and poetically",
+    setting: "A 300-year-old haveli in an old walled city",
+    scene:
+      "You stand in the courtyard of your 300-year-old haveli, hands clasped behind your back, sunlight streaming through carved jharokha windows. The walls are alive with peeling frescoes of court scenes. The learner has just stepped through your massive wooden door for a tour.",
+    subGoals: [
+      "Greet the haveli owner with a respectful, formal greeting",
+      "Ask at least 2 questions about the haveli's history or architecture",
+      "Negotiate the price of a souvenir before leaving",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 12,
       nativeTolerance: "low",
       formality: "formal",
-      characterQuirks: "Uses Urdu-Hindi literary phrases. Quotes poetry. Expects respectful address. Gets animated about architecture details.",
+      characterQuirks: "Uses literary phrases and proverbs. Quotes poetry. Expects respectful address. Gets animated about architecture details.",
       openingStyle: "Welcome the visitor with a formal, poetic greeting about the haveli's heritage",
     } as ScenarioPromptConfig,
   },
   {
     id: "kochi-houseboat",
-    title: "Kerala Houseboat Booking",
-    language: "ml" as LanguageCode,
-    description: "Book a backwater houseboat in Alleppey speaking Malayalam",
+    title: "Houseboat Booking",
+    description: "Book a backwater houseboat for an overnight stay",
     goal: "Negotiate the best package including meals and overnight stay",
     difficulty: "intermediate" as const,
-    persona: "Experienced houseboat operator who only speaks Malayalam",
-    setting: "Alleppey backwater jetty, morning",
+    persona: "Experienced houseboat operator who knows the backwaters well",
+    setting: "A backwater boat jetty in the morning",
+    scene:
+      "You're at the boat jetty, the morning mist still rising off the still water. Your wooden houseboat is moored behind you, deck cleaned, banana leaf garlands tied to the prow. You've operated boats for fifteen years. The learner walks up looking interested in a booking.",
+    subGoals: [
+      "Greet the operator and ask about available houseboat packages",
+      "Ask about meals and overnight stay options",
+      "Negotiate the final price/inclusions and book",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 10,
       nativeTolerance: "low",
@@ -175,18 +238,24 @@ export const SCENARIO_ROOMS = [
   },
   {
     id: "varanasi-ghat",
-    title: "Varanasi Evening Aarti",
-    language: "hi" as LanguageCode,
-    description: "Navigate the ghats and learn about the Ganga Aarti ritual in Hindi",
+    title: "Evening Aarti Ceremony",
+    description: "Navigate the riverbank ghats and learn about the evening aarti",
     goal: "Find a good viewing spot and understand the significance of the ceremony",
     difficulty: "advanced" as const,
-    persona: "Pandit at Dashashwamedh Ghat who speaks eloquent Hindi with Sanskrit terms",
-    setting: "Dashashwamedh Ghat during evening Ganga Aarti",
+    persona: "Pandit at the riverbank who speaks eloquently with reverence",
+    setting: "A holy riverbank during the evening aarti ritual",
+    scene:
+      "You're a senior pandit on the riverbank steps as evening falls. Lamps are being prepared, the river smells of incense and marigolds, conch shells are being readied. The learner approaches respectfully, looking for a good viewing spot for the aarti.",
+    subGoals: [
+      "Greet the pandit with appropriate reverence",
+      "Ask about the significance of the aarti ceremony",
+      "Find a viewing spot and ask about one specific ritual or object",
+    ] as SubGoal[],
     promptConfig: {
       maxTurns: 12,
       nativeTolerance: "low",
       formality: "formal",
-      characterQuirks: "Uses Sanskrit shlokas naturally. Explains spiritual significance with reverence. Occasionally tests the learner's understanding with questions.",
+      characterQuirks: "Uses devotional phrases naturally. Explains spiritual significance with reverence. Occasionally tests the learner's understanding with questions.",
       openingStyle: "Begin with a spiritual greeting appropriate for the sacred setting",
     } as ScenarioPromptConfig,
   },
@@ -247,3 +316,7 @@ export const EAVESDROP_CONTEXTS = [
 ] as const;
 
 export const DIFFICULTY_LEVELS = ["beginner", "intermediate", "advanced"] as const;
+
+export type SessionDifficulty = "easy" | "normal" | "hard";
+
+export const SESSION_DIFFICULTIES: SessionDifficulty[] = ["easy", "normal", "hard"];
