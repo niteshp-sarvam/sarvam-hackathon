@@ -21,7 +21,8 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const PORT = parseInt(process.env.VOICE_SERVER_PORT ?? "8081", 10);
+// Support both local runs (VOICE_SERVER_PORT) and PaaS defaults (PORT).
+const PORT = parseInt(process.env.VOICE_SERVER_PORT ?? process.env.PORT ?? "8081", 10);
 const API_KEY = process.env.SARVAM_API_KEY;
 
 if (!API_KEY) {
@@ -100,7 +101,7 @@ wss.on("connection", (socket, req) => {
     console.log(`[voice-server] [${roomId}] TTS audio chunk: ${buf.byteLength} bytes`);
   });
 
-  new MicdropServer(socket as unknown as Parameters<typeof MicdropServer>[0], {
+  new MicdropServer(socket as any, {
     agent,
     stt,
     tts,

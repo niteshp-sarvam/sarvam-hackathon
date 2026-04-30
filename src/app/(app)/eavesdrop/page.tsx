@@ -640,8 +640,9 @@ TRANSLATIONS:
                       <Button
                         variant="primary"
                         onClick={() => {
-                          const matchingRoom = SCENARIO_ROOMS.find((r) => r.language === targetLanguage);
-                          router.push(matchingRoom ? `/scenario-rooms/${matchingRoom.id}` : "/scenario-rooms");
+                          const jumpInRoom =
+                            SCENARIO_ROOMS.find((r) => r.difficulty === "beginner") ?? SCENARIO_ROOMS[0];
+                          router.push(`/scenario-rooms/${jumpInRoom.id}`);
                         }}
                       >
                         Open Scenario Room
