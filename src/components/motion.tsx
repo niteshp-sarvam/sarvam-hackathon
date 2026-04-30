@@ -728,11 +728,11 @@ function MessageBubble({
   scenarioContext,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
-  // For agent: source = target language, output = native language (let learner read meaning).
-  // For user:  source = native language, output = target language (show what they "should" have said).
-  const fromLang = isUser ? nativeLanguageCode : targetLanguageCode;
-  const toLang = isUser ? targetLanguageCode : nativeLanguageCode;
-  const toLabel = isUser ? targetLanguageLabel : nativeLanguageLabel;
+  // Transcript bubbles are shown in target language during live practice.
+  // Toggle should consistently reveal the learner's native-language meaning.
+  const fromLang = targetLanguageCode;
+  const toLang = nativeLanguageCode;
+  const toLabel = nativeLanguageLabel;
 
   const cacheKey = `${fromLang}:${toLang}:${message.content}`;
   const initialTranslation = translationCache.get(cacheKey) ?? null;
@@ -1026,7 +1026,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
           fontWeight: 600,
           letterSpacing: 0.3,
           textTransform: "uppercase",
-          color: "rgba(255,255,255,0.6)",
+          color: "var(--tatva-content-tertiary, rgba(255,255,255,0.6))",
           padding: "0 6px",
         }}
       >
@@ -1053,7 +1053,9 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
           style={{
             fontSize: 14.5,
             lineHeight: 1.55,
-            color: "#fff",
+            color: isUser
+              ? "var(--tatva-content-inverse, #fff)"
+              : "var(--tatva-content-primary, #fff)",
             wordBreak: "break-word",
           }}
         >
@@ -1071,7 +1073,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                 background: "transparent",
                 border: "none",
                 padding: "2px 6px",
-                color: "rgba(255,255,255,0.7)",
+                color: "var(--tatva-content-secondary, rgba(255,255,255,0.7))",
                 fontSize: 11.5,
                 fontWeight: 500,
                 cursor: "pointer",
@@ -1136,11 +1138,11 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                 marginTop: 2,
                 padding: "8px 14px",
                 borderRadius: 12,
-                background: "rgba(255,255,255,0.04)",
-                border: "1px dashed rgba(255,255,255,0.18)",
+                background: "var(--tatva-surface-secondary, rgba(255,255,255,0.04))",
+                border: "1px dashed var(--tatva-border-secondary, rgba(255,255,255,0.18))",
                 fontSize: 13,
                 lineHeight: 1.5,
-                color: "rgba(255,255,255,0.88)",
+                color: "var(--tatva-content-secondary, rgba(255,255,255,0.88))",
                 fontStyle: loading || error ? "italic" : "normal",
                 alignSelf: isUser ? "flex-end" : "flex-start",
               }}
@@ -1191,7 +1193,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                 <span
                   style={{
                     fontSize: 12.5,
-                    color: "rgba(255,255,255,0.7)",
+                    color: "var(--tatva-content-secondary, rgba(255,255,255,0.7))",
                     fontStyle: "italic",
                   }}
                 >
@@ -1214,9 +1216,9 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                       padding: "3px 10px",
                       borderRadius: 999,
                       fontSize: 11.5,
-                      border: "1px solid rgba(255,255,255,0.2)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "#fff",
+                      border: "1px solid var(--tatva-border-primary, rgba(255,255,255,0.2))",
+                      background: "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
+                      color: "var(--tatva-content-primary, #fff)",
                       cursor: "pointer",
                     }}
                   >
@@ -1259,7 +1261,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                     style={{
                       fontSize: 12,
                       fontWeight: 600,
-                      color: "#fff",
+                      color: "var(--tatva-content-primary, #fff)",
                       minWidth: 38,
                       textAlign: "right",
                       fontVariantNumeric: "tabular-nums",
@@ -1283,8 +1285,8 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                       gap: 10,
                       padding: "8px 10px",
                       borderRadius: 10,
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "var(--tatva-surface-secondary, rgba(255,255,255,0.04))",
+                      border: "1px solid var(--tatva-border-secondary, rgba(255,255,255,0.08))",
                     }}
                   >
                     <button
@@ -1301,7 +1303,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                         background: isPlaying
                           ? "rgba(88,204,2,0.28)"
                           : "rgba(255,220,120,0.14)",
-                        color: "#fff",
+                        color: "var(--tatva-content-primary, #fff)",
                         cursor: isLoading ? "wait" : "pointer",
                         display: "inline-flex",
                         alignItems: "center",
@@ -1326,7 +1328,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                         style={{
                           fontSize: 14.5,
                           fontWeight: 600,
-                          color: "#fff",
+                          color: "var(--tatva-content-primary, #fff)",
                           lineHeight: 1.4,
                           wordBreak: "break-word",
                         }}
@@ -1337,7 +1339,7 @@ Example for target=Hindi, native=English: [SUGGEST:कितना है? (How 
                         <span
                           style={{
                             fontSize: 12.5,
-                            color: "rgba(255,255,255,0.7)",
+                            color: "var(--tatva-content-secondary, rgba(255,255,255,0.7))",
                             lineHeight: 1.4,
                           }}
                         >

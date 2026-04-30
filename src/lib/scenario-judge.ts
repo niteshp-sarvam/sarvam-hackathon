@@ -74,8 +74,9 @@ export async function judgeScenario(args: JudgeArgs): Promise<JudgeResult> {
   const subGoalsBlock = room.subGoals
     .map((g, i) => `  ${i + 1}. ${g}`)
     .join("\n");
+  const objectiveBlock = buildObjectiveJudgeBlock(room);
 
-  const sysPrompt = `You are a strict but fair language-learning evaluator.
+  const sysPrompt = `You are a supportive, fair, and slightly lenient language-learning evaluator.
 You will score a role-play conversation where a LEARNER practised speaking ${targetLanguageName} with a CHARACTER played by an AI.
 
 Your job: decide three independent badges, then list 3-5 phrases the learner struggled with.
@@ -87,6 +88,8 @@ Title: ${room.title}
 Goal: ${room.goal}
 Sub-goals (in order):
 ${subGoalsBlock}
+Objective contract:
+${objectiveBlock}
 
 Sub-goals the agent claimed were satisfied: ${subGoalsHit} / ${room.subGoals.length}
 
@@ -99,9 +102,9 @@ English-fallback turns: ${englishFallbacks}
 ═══════════════════════════════════════════
 BADGE RULES
 ═══════════════════════════════════════════
-1. "goal" badge → TRUE only if the conversation actually reached the scenario goal AND most sub-goals were genuinely satisfied (not just declared by the AI character without learner participation).
-2. "language" badge → TRUE only if the learner stayed in ${targetLanguageName} for ≥ 80% of their turns. Use englishFallbacks / totalLearnerTurns as the primary signal.
-3. "vocab" badge → TRUE only if the learner used at least 6 distinct, meaningful ${targetLanguageName} content words (not counting yes/no/ok/please).
+1. "goal" badge → TRUE if the objective contract was reasonably met OR at least half of the sub-goals were genuinely satisfied (not just declared by the AI character without learner participation).
+2. "language" badge → TRUE if the learner stayed in ${targetLanguageName} for roughly most turns (about ≥ 65%). Use englishFallbacks / totalLearnerTurns as the primary signal.
+3. "vocab" badge → TRUE if the learner used at least 4 distinct, meaningful ${targetLanguageName} content words (not counting yes/no/ok/please).
 
 ═══════════════════════════════════════════
 OUTPUT FORMAT
@@ -136,7 +139,7 @@ Rules for the JSON:
     raw = data?.choices?.[0]?.message?.content ?? "";
   } catch (err) {
     console.error("[judgeScenario] call failed:", err);
-    return fallbackResult(room, subGoalsHit, totalLearnerTurns, englishFallbacks);
+    return fallbackResult(room, subGoalsHit, totalLearnerTurns, englishFallbacks, cleanedTranscript);
   }
 
   const parsed = extractJson(raw) as
@@ -148,7 +151,7 @@ Rules for the JSON:
     | null;
   if (!parsed) {
     console.warn("[judgeScenario] could not parse judge JSON:", raw.slice(0, 200));
-    return fallbackResult(room, subGoalsHit, totalLearnerTurns, englishFallbacks);
+    return fallbackResult(room, subGoalsHit, totalLearnerTurns, englishFallbacks, cleanedTranscript);
   }
 
   const badges: JudgeBadges = {
@@ -230,14 +233,16 @@ function fallbackResult(
   room: ScenarioRoomLike,
   subGoalsHit: number,
   totalLearnerTurns: number,
-  englishFallbacks: number
+  englishFallbacks: number,
+  cleanedTranscript: string
 ): JudgeResult {
   const subGoalRatio = room.subGoals.length === 0 ? 0 : subGoalsHit / room.subGoals.length;
   const englishRatio = totalLearnerTurns === 0 ? 1 : englishFallbacks / totalLearnerTurns;
+  const objectiveGoalHit = evaluateObjectiveFallback(room, cleanedTranscript);
   const badges: JudgeBadges = {
-    goal: subGoalRatio >= 0.7,
-    language: englishRatio < 0.2,
-    vocab: totalLearnerTurns >= 4 && englishRatio < 0.4,
+    goal: objectiveGoalHit || subGoalRatio >= 0.5,
+    language: englishRatio <= 0.35,
+    vocab: totalLearnerTurns >= 3 && englishRatio <= 0.55,
   };
   const stars =
     (badges.goal ? 1 : 0) + (badges.language ? 1 : 0) + (badges.vocab ? 1 : 0);
@@ -246,8 +251,8 @@ function fallbackResult(
     stars,
     reasons: {
       goal: badges.goal
-        ? `Reached ${subGoalsHit}/${room.subGoals.length} sub-goals.`
-        : `Only ${subGoalsHit}/${room.subGoals.length} sub-goals were satisfied.`,
+        ? "Goal and sub-goals were satisfied."
+        : `Objective unmet or only ${subGoalsHit}/${room.subGoals.length} sub-goals were satisfied.`,
       language: badges.language
         ? "You stayed in the target language for most turns."
         : `English in ${englishFallbacks}/${totalLearnerTurns} turns.`,
@@ -257,4 +262,99 @@ function fallbackResult(
     },
     struggleWords: [],
   };
+}
+
+function buildObjectiveJudgeBlock(room: ScenarioRoomLike): string {
+  const objective = room.objective;
+  switch (objective.kind) {
+    case "max_total_price":
+      return [
+        `- Type: max_total_price`,
+        `- Success requires final agreed total <= ₹${objective.targetMax}.`,
+        `- Opening quote should start above target and be negotiated down.`,
+      ].join("\n");
+    case "meter_or_fair_fare":
+      return [
+        `- Type: meter_or_fair_fare`,
+        objective.allowFairFixedFare
+          ? "- Success if driver agrees to meter OR a clearly fair fixed fare."
+          : "- Success only if driver agrees to meter fare.",
+      ].join("\n");
+    case "dietary_order":
+      return [
+        `- Type: dietary_order`,
+        `- Required constraints: ${objective.requiredConstraints.join(", ")}.`,
+      ].join("\n");
+    case "visit_count_and_theme":
+      return [
+        `- Type: visit_count_and_theme`,
+        `- Must cover ${objective.requiredStops} stops and at least one theme discussion.`,
+      ].join("\n");
+    case "menu_customization":
+      return [
+        `- Type: menu_customization`,
+        `- Required selections: ${objective.requiredSelections.join(", ")}.`,
+      ].join("\n");
+    case "group_order":
+      return [
+        `- Type: group_order`,
+        `- Order should clearly cover ${objective.groupSize} people with varied preferences.`,
+      ].join("\n");
+    case "directions_and_exit":
+      return [
+        `- Type: directions_and_exit`,
+        `- Must include line/direction and exit or coach guidance.`,
+      ].join("\n");
+    case "tour_and_bargain":
+      return [
+        `- Type: tour_and_bargain`,
+        `- At least ${objective.minHistoryQuestions} history/architecture questions and souvenir bargaining.`,
+      ].join("\n");
+    case "package_negotiation":
+      return [
+        `- Type: package_negotiation`,
+        `- Must finalize package with meals and overnight inclusions.`,
+      ].join("\n");
+    case "ceremony_understanding":
+      return [
+        `- Type: ceremony_understanding`,
+        `- Must secure viewing spot and understand one ritual/object.`,
+      ].join("\n");
+    default:
+      return "- Type: generic objective. Use scenario goal and sub-goals.";
+  }
+}
+
+function evaluateObjectiveFallback(room: ScenarioRoomLike, transcript: string): boolean {
+  const objective = room.objective;
+  switch (objective.kind) {
+    case "max_total_price": {
+      const prices = extractRupeeAmounts(transcript);
+      if (!prices.length) return false;
+      const hasOpeningAboveTarget = prices.some((price) => price > objective.targetMax);
+      const hasAtOrBelowTarget = prices.some((price) => price <= objective.targetMax);
+      const hasCloseSignal = /\b(final|deal|agreed|total|done|fix(?:ed)?)\b|पक्का|तय|फाइनल/i.test(
+        transcript
+      );
+      return hasOpeningAboveTarget && hasAtOrBelowTarget && hasCloseSignal;
+    }
+    case "meter_or_fair_fare":
+      return /meter|मीटर|fare|किराया/i.test(transcript);
+    case "visit_count_and_theme":
+      return room.subGoals.length > 0;
+    case "group_order":
+      return /\b4\b|four|चार/i.test(transcript);
+    default:
+      return true;
+  }
+}
+
+function extractRupeeAmounts(transcript: string): number[] {
+  const matches = transcript.match(/₹\s*\d+|\d+\s*(?:rupees?|rs|₹)/gi) ?? [];
+  const values = matches
+    .map((token) => token.match(/\d+/)?.[0])
+    .filter((value): value is string => Boolean(value))
+    .map((value) => parseInt(value, 10))
+    .filter((value) => Number.isFinite(value));
+  return values;
 }

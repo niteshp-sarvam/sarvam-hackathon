@@ -78,6 +78,12 @@ export class SarvamSTT extends STT {
       if (resolved) return;
       resolved = true;
       cleanup();
+      // Empty/timeout noise turns should not be forwarded as user utterances,
+      // otherwise they can interrupt an in-flight assistant response.
+      if (!text.trim()) {
+        console.log(`${tag} Transcript dropped (empty/noise turn)`);
+        return;
+      }
       this.emit("Transcript", text);
     };
 

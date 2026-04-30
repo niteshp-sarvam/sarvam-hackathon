@@ -12,6 +12,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const identity = useAppStore((s) => s.identity);
   const { resolvedMode, toggle: toggleTheme } = useTheme();
+  const isImmersiveScenarioRoom = pathname.startsWith("/scenario-rooms/");
 
   return (
     <SidebarProvider>
@@ -90,15 +91,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <Box
           display="flex"
           direction="column"
-          m={4}
+          m={isImmersiveScenarioRoom ? 0 : 4}
           grow
           minW="0"
           overflow="hidden"
-          rounded="md"
-          bg="surface-secondary"
-          style={{ boxShadow: "var(--tatva-shadow-l1, 0 1px 3px rgba(0,0,0,.1))" }}
+          rounded={isImmersiveScenarioRoom ? undefined : "md"}
+          bg={isImmersiveScenarioRoom ? "surface-primary" : "surface-secondary"}
+          style={{
+            boxShadow: isImmersiveScenarioRoom
+              ? "none"
+              : "var(--tatva-shadow-l1, 0 1px 3px rgba(0,0,0,.1))",
+          }}
         >
-          <Box as="main" grow overflow="auto" p={10}>
+          <Box as="main" grow overflow="auto" p={isImmersiveScenarioRoom ? 0 : 10}>
             {children}
           </Box>
         </Box>

@@ -26,6 +26,78 @@ export interface ScenarioPromptConfig {
   openingStyle?: string;
 }
 
+export type ScenarioObjective =
+  | {
+      kind: "max_total_price";
+      currency: "INR";
+      targetMax: number;
+      openingQuoteRange: readonly [number, number];
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "meter_or_fair_fare";
+      allowFairFixedFare: boolean;
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "dietary_order";
+      requiredConstraints: readonly string[];
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "visit_count_and_theme";
+      requiredStops: number;
+      requireThemeDiscussion: boolean;
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "menu_customization";
+      requiredSelections: readonly string[];
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "group_order";
+      groupSize: number;
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "directions_and_exit";
+      requireLineAndDirection: boolean;
+      requireExitGuidance: boolean;
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "tour_and_bargain";
+      minHistoryQuestions: number;
+      requireSouvenirNegotiation: boolean;
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "package_negotiation";
+      requireMealsAndOvernight: boolean;
+      successCriteria: readonly string[];
+    }
+  | {
+      kind: "ceremony_understanding";
+      requireViewingSpot: boolean;
+      requireRitualUnderstanding: boolean;
+      successCriteria: readonly string[];
+    };
+
+export interface ScenarioRoom {
+  id: string;
+  title: string;
+  description: string;
+  goal: string;
+  difficulty: "beginner" | "intermediate" | "advanced";
+  persona: string;
+  setting: string;
+  scene: string;
+  subGoals: SubGoal[];
+  objective: ScenarioObjective;
+  promptConfig: ScenarioPromptConfig;
+}
+
 // A short ordered checklist the agent should drive the learner through.
 // Each entry is one human-readable goal — written in English (the meta-language
 // of the platform) but the conversation itself runs in any of the 8 supported
@@ -51,6 +123,17 @@ export const SCENARIO_ROOMS = [
       "Counter-offer or negotiate a lower price",
       "Agree on a final total under ₹200 and close the deal",
     ] as SubGoal[],
+    objective: {
+      kind: "max_total_price",
+      currency: "INR",
+      targetMax: 200,
+      openingQuoteRange: [260, 360],
+      successCriteria: [
+        "Learner asks initial price for at least one item",
+        "Learner negotiates down from opening quote",
+        "Final agreed total is <= ₹200",
+      ],
+    },
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -74,6 +157,15 @@ export const SCENARIO_ROOMS = [
       "Push back when the driver refuses the meter or asks for fixed fare",
       "Get the driver to agree to use the meter (or a fair fixed fare)",
     ] as SubGoal[],
+    objective: {
+      kind: "meter_or_fair_fare",
+      allowFairFixedFare: true,
+      successCriteria: [
+        "Destination is clearly stated",
+        "Driver pushback is handled",
+        "Meter use or fair fixed fare is agreed",
+      ],
+    },
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -96,6 +188,15 @@ export const SCENARIO_ROOMS = [
       "Specify dietary restrictions clearly (vegetarian, no onion, no garlic)",
       "Confirm the schedule, address, and price for the order",
     ] as SubGoal[],
+    objective: {
+      kind: "dietary_order",
+      requiredConstraints: ["vegetarian", "no onion", "no garlic"],
+      successCriteria: [
+        "Daily tiffin intent is stated",
+        "Dietary restrictions are clearly communicated",
+        "Schedule/address/price are confirmed",
+      ],
+    },
     promptConfig: {
       maxTurns: 10,
       nativeTolerance: "medium",
@@ -118,6 +219,16 @@ export const SCENARIO_ROOMS = [
       "Ask about the theme or significance of at least one pandal",
       "Ask about a second or third pandal to visit",
     ] as SubGoal[],
+    objective: {
+      kind: "visit_count_and_theme",
+      requiredStops: 3,
+      requireThemeDiscussion: true,
+      successCriteria: [
+        "At least one pandal theme/significance is discussed",
+        "Learner asks for multiple pandal stops",
+        "Conversation reaches a usable 3-pandal plan",
+      ],
+    },
     promptConfig: {
       maxTurns: 12,
       nativeTolerance: "medium",
@@ -140,6 +251,15 @@ export const SCENARIO_ROOMS = [
       "Specify spice level (mild / medium / spicy)",
       "Add at least one side or drink to complete the order",
     ] as SubGoal[],
+    objective: {
+      kind: "menu_customization",
+      requiredSelections: ["biryani_type", "spice_level", "side_or_drink"],
+      successCriteria: [
+        "Biryani type is selected",
+        "Spice level is selected",
+        "At least one add-on is selected",
+      ],
+    },
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -162,6 +282,15 @@ export const SCENARIO_ROOMS = [
       "Order at least one snack item",
       "Customise the order for a group of 4 with different preferences",
     ] as SubGoal[],
+    objective: {
+      kind: "group_order",
+      groupSize: 4,
+      successCriteria: [
+        "Chai order is placed",
+        "At least one snack is added",
+        "Order reflects different preferences for all four people",
+      ],
+    },
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -184,6 +313,16 @@ export const SCENARIO_ROOMS = [
       "Confirm which line and direction to take",
       "Ask about which exit or coach is best for the destination",
     ] as SubGoal[],
+    objective: {
+      kind: "directions_and_exit",
+      requireLineAndDirection: true,
+      requireExitGuidance: true,
+      successCriteria: [
+        "Target station is clarified",
+        "Line/direction are confirmed",
+        "Best exit/coach guidance is obtained",
+      ],
+    },
     promptConfig: {
       maxTurns: 8,
       nativeTolerance: "high",
@@ -206,6 +345,16 @@ export const SCENARIO_ROOMS = [
       "Ask at least 2 questions about the haveli's history or architecture",
       "Negotiate the price of a souvenir before leaving",
     ] as SubGoal[],
+    objective: {
+      kind: "tour_and_bargain",
+      minHistoryQuestions: 2,
+      requireSouvenirNegotiation: true,
+      successCriteria: [
+        "Formal greeting is used",
+        "At least two history/architecture questions are asked",
+        "Souvenir price is negotiated before closing",
+      ],
+    },
     promptConfig: {
       maxTurns: 12,
       nativeTolerance: "low",
@@ -229,6 +378,15 @@ export const SCENARIO_ROOMS = [
       "Ask about meals and overnight stay options",
       "Negotiate the final price/inclusions and book",
     ] as SubGoal[],
+    objective: {
+      kind: "package_negotiation",
+      requireMealsAndOvernight: true,
+      successCriteria: [
+        "Package options are discussed",
+        "Meals and overnight details are clarified",
+        "Final negotiated package is confirmed/booked",
+      ],
+    },
     promptConfig: {
       maxTurns: 10,
       nativeTolerance: "low",
@@ -251,6 +409,16 @@ export const SCENARIO_ROOMS = [
       "Ask about the significance of the aarti ceremony",
       "Find a viewing spot and ask about one specific ritual or object",
     ] as SubGoal[],
+    objective: {
+      kind: "ceremony_understanding",
+      requireViewingSpot: true,
+      requireRitualUnderstanding: true,
+      successCriteria: [
+        "Respectful greeting is used",
+        "Ceremony significance is discussed",
+        "Viewing spot and one ritual/object are clarified",
+      ],
+    },
     promptConfig: {
       maxTurns: 12,
       nativeTolerance: "low",
@@ -259,7 +427,86 @@ export const SCENARIO_ROOMS = [
       openingStyle: "Begin with a spiritual greeting appropriate for the sacred setting",
     } as ScenarioPromptConfig,
   },
-] as const;
+] as const satisfies readonly ScenarioRoom[];
+
+function assertScenarioRoomConfigs(rooms: readonly ScenarioRoom[]) {
+  const seenIds = new Set<string>();
+
+  for (const room of rooms) {
+    if (seenIds.has(room.id)) {
+      throw new Error(`Duplicate scenario id detected: ${room.id}`);
+    }
+    seenIds.add(room.id);
+
+    if (!room.subGoals.length) {
+      throw new Error(`Scenario "${room.id}" must define at least one sub-goal.`);
+    }
+    if (room.promptConfig.maxTurns < room.subGoals.length + 1) {
+      throw new Error(
+        `Scenario "${room.id}" maxTurns is too low for its sub-goal count.`
+      );
+    }
+
+    switch (room.objective.kind) {
+      case "max_total_price": {
+        const [minQuote, maxQuote] = room.objective.openingQuoteRange;
+        if (!(minQuote > room.objective.targetMax)) {
+          throw new Error(
+            `Scenario "${room.id}" openingQuoteRange must start above targetMax.`
+          );
+        }
+        if (minQuote - room.objective.targetMax < 20) {
+          throw new Error(
+            `Scenario "${room.id}" openingQuoteRange must provide at least ₹20 negotiation headroom.`
+          );
+        }
+        if (maxQuote < minQuote) {
+          throw new Error(
+            `Scenario "${room.id}" openingQuoteRange must be [min,max] with max >= min.`
+          );
+        }
+        break;
+      }
+      case "dietary_order":
+        if (!room.objective.requiredConstraints.length) {
+          throw new Error(
+            `Scenario "${room.id}" dietary objective requires constraints.`
+          );
+        }
+        break;
+      case "visit_count_and_theme":
+        if (room.objective.requiredStops < 2) {
+          throw new Error(
+            `Scenario "${room.id}" visit_count_and_theme requires at least 2 stops.`
+          );
+        }
+        break;
+      case "menu_customization":
+        if (!room.objective.requiredSelections.length) {
+          throw new Error(
+            `Scenario "${room.id}" menu_customization requires selections.`
+          );
+        }
+        break;
+      case "group_order":
+        if (room.objective.groupSize < 2) {
+          throw new Error(`Scenario "${room.id}" group_order requires groupSize >= 2.`);
+        }
+        break;
+      case "tour_and_bargain":
+        if (room.objective.minHistoryQuestions < 1) {
+          throw new Error(
+            `Scenario "${room.id}" tour_and_bargain requires at least one history question.`
+          );
+        }
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+assertScenarioRoomConfigs(SCENARIO_ROOMS);
 
 export const GREETING_SUGGESTIONS: Record<string, { phrase: string; meaning: string }[]> = {
   hi: [

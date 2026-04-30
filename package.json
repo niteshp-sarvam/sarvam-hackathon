@@ -23,6 +23,7 @@
     "@micdrop/server": "^2.2.2",
     "@prisma/client": "^6.19.3",
     "@sarvam/tatva": "^0.0.2",
+    "@sentry/nextjs": "^10.51.0",
     "bcryptjs": "^3.0.3",
     "canvas-confetti": "^1.9.4",
     "dotenv": "^17.4.2",

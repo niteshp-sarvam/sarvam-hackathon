@@ -11,6 +11,7 @@ import {
   Icon,
 } from "@sarvam/tatva";
 import { useAppStore } from "@/lib/store";
+import { useTheme } from "@/lib/theme";
 import {
   SCENARIO_ROOMS,
   SUPPORTED_LANGUAGES,
@@ -19,8 +20,13 @@ import {
 } from "@/lib/constants";
 import { getCurriculum } from "@/lib/curriculum";
 import { buildSystemPrompt, type ScenarioRoomLike } from "@/lib/scenario-prompt";
-import { judgeScenario, type JudgeResult } from "@/lib/scenario-judge";
+import {
+  judgeScenario,
+  type JudgeResult,
+  type JudgeStruggleWord,
+} from "@/lib/scenario-judge";
 import { isEnglishLeaning } from "@/lib/english-detector";
+import { createCard } from "@/lib/fsrs";
 import {
   FadeIn,
   StaggerContainer,
@@ -77,10 +83,13 @@ export default function ScenarioRoomPage({
     targetLanguage,
     nativeLanguage,
     addScenarioResult,
+    gardenCards,
+    addGardenCard,
     addXp,
     addActivity,
     completeLesson,
   } = useAppStore();
+  const { resolvedMode } = useTheme();
 
   const room = SCENARIO_ROOMS.find((r) => r.id === roomId);
   // Scenarios are language-agnostic — the conversation runs in whichever
@@ -97,6 +106,9 @@ export default function ScenarioRoomPage({
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [replayLoading, setReplayLoading] = useState(false);
   const [transcriptCopied, setTranscriptCopied] = useState(false);
+  const [plantedWords, setPlantedWords] = useState<
+    { phrase: string; meaning: string; isNew: boolean }[]
+  >([]);
 
   const micdropState = useMicdropState();
   useMicdropError((err) => console.error("[Micdrop]", err.message));
@@ -133,6 +145,40 @@ export default function ScenarioRoomPage({
   const judgingFiredRef = useRef(false);
   const replayAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const plantStruggleWords = useCallback(
+    (words: JudgeStruggleWord[]) => {
+      if (!targetLanguage || words.length === 0) return [];
+
+      const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+      const existing = new Set(
+        gardenCards.map((card) => `${card.language}:${normalize(card.word).toLowerCase()}`)
+      );
+      const seenBatch = new Set<string>();
+      const planted: { phrase: string; meaning: string; isNew: boolean }[] = [];
+
+      for (const word of words) {
+        const phrase = normalize(word.phrase ?? "");
+        if (!phrase) continue;
+
+        const meaning = normalize(word.meaning ?? "") || "Scenario phrase to review";
+        const key = `${targetLanguage}:${phrase.toLowerCase()}`;
+        if (seenBatch.has(key)) continue;
+        seenBatch.add(key);
+
+        if (!existing.has(key)) {
+          addGardenCard(createCard(phrase, meaning, targetLanguage, "vocabulary"));
+          existing.add(key);
+          planted.push({ phrase, meaning, isNew: true });
+        } else {
+          planted.push({ phrase, meaning, isNew: false });
+        }
+      }
+
+      return planted;
+    },
+    [targetLanguage, gardenCards, addGardenCard]
+  );
+
   const sessionTemperature = useMemo(() => {
     if (!room) return 0.7;
     const base = FORMALITY_BASE_TEMP[room.promptConfig.formality] ?? 0.7;
@@ -141,6 +187,36 @@ export default function ScenarioRoomPage({
   }, [room, difficulty]);
 
   const sessionMaxTokens = DIFFICULTY_MAX_TOKENS[difficulty];
+
+  const immersiveThemeStyle = useMemo(() => {
+    if (resolvedMode === "light") {
+      return {
+        ["--tatva-content-primary" as string]: "rgba(15,23,42,0.94)",
+        ["--tatva-content-secondary" as string]: "rgba(30,41,59,0.82)",
+        ["--tatva-content-tertiary" as string]: "rgba(51,65,85,0.62)",
+        ["--tatva-content-inverse" as string]: "#ffffff",
+        ["--tatva-surface-secondary" as string]: "rgba(255,255,255,0.72)",
+        ["--tatva-background-primary" as string]: "rgba(255,255,255,0.9)",
+        ["--tatva-border-primary" as string]: "rgba(15,23,42,0.16)",
+        ["--tatva-border-secondary" as string]: "rgba(15,23,42,0.1)",
+        background:
+          "radial-gradient(circle at 50% 12%, rgba(88,204,2,0.14), transparent 30%), linear-gradient(180deg, #f8fbff 0%, #edf3fb 100%)",
+      };
+    }
+
+    return {
+      ["--tatva-content-primary" as string]: "rgba(255,255,255,0.94)",
+      ["--tatva-content-secondary" as string]: "rgba(255,255,255,0.8)",
+      ["--tatva-content-tertiary" as string]: "rgba(255,255,255,0.62)",
+      ["--tatva-content-inverse" as string]: "#ffffff",
+      ["--tatva-surface-secondary" as string]: "rgba(255,255,255,0.06)",
+      ["--tatva-background-primary" as string]: "rgba(255,255,255,0.08)",
+      ["--tatva-border-primary" as string]: "rgba(255,255,255,0.22)",
+      ["--tatva-border-secondary" as string]: "rgba(255,255,255,0.14)",
+      background:
+        "radial-gradient(circle at 50% 12%, rgba(88,204,2,0.08), transparent 28%), linear-gradient(180deg, #0d0f14 0%, #141922 100%)",
+    };
+  }, [resolvedMode]);
 
   const startVoiceSession = useCallback(async () => {
     if (!room || !lang) return;
@@ -151,6 +227,7 @@ export default function ScenarioRoomPage({
       lang,
       difficulty,
       sessionSeed,
+      disableSceneMarkers: true,
     });
 
     const wsUrl = new URL(VOICE_SERVER_URL);
@@ -159,6 +236,10 @@ export default function ScenarioRoomPage({
     wsUrl.searchParams.set("systemPrompt", systemPrompt);
     wsUrl.searchParams.set("temperature", sessionTemperature.toFixed(2));
     wsUrl.searchParams.set("maxTokens", String(sessionMaxTokens));
+    if (room.objective.kind === "max_total_price") {
+      wsUrl.searchParams.set("firstTurnMinQuote", String(room.objective.openingQuoteRange[0]));
+      wsUrl.searchParams.set("targetMax", String(room.objective.targetMax));
+    }
 
     try {
       await Micdrop.stop().catch(() => {});
@@ -215,6 +296,8 @@ export default function ScenarioRoomPage({
       transcript: transcriptForJudge,
     })
       .then((result) => {
+        const planted = plantStruggleWords(result.struggleWords);
+        setPlantedWords(planted);
         setJudgeResult(result);
         setIsJudging(false);
 
@@ -258,7 +341,7 @@ export default function ScenarioRoomPage({
         console.error("[ScenarioRoom] judge failed:", err);
         setIsJudging(false);
       });
-  }, [isComplete, stopVoiceSession, voiceConversation, room, lang, targetLanguage, nativeLanguage, subGoalsHit, voiceTurnCount, difficulty, addScenarioResult, addActivity, addXp, completeLesson]);
+  }, [isComplete, stopVoiceSession, voiceConversation, room, lang, targetLanguage, nativeLanguage, subGoalsHit, voiceTurnCount, difficulty, addScenarioResult, addActivity, addXp, completeLesson, plantStruggleWords]);
 
   const retryConnection = useCallback(() => {
     setConnectionError(false);
@@ -279,6 +362,7 @@ export default function ScenarioRoomPage({
       setIsJudging(false);
       setTranscriptCopied(false);
       setIsMicMuted(false);
+      setPlantedWords([]);
       setSessionSeed(randomSessionSeed());
       if (nextDifficulty) setDifficulty(nextDifficulty);
       voiceStartedRef.current = false;
@@ -569,15 +653,19 @@ export default function ScenarioRoomPage({
     );
   }
 
+  const isLiveSession = !connectionError && !isComplete;
+
   return (
     <Box display="flex" direction="column" h="full">
-      <Header
-        type="main"
-        left={{
-          title: room.title,
-        }}
-        onBack={() => router.push("/scenario-rooms")}
-      />
+      {!isLiveSession && (
+        <Header
+          type="main"
+          left={{
+            title: room.title,
+          }}
+          onBack={() => router.push("/scenario-rooms")}
+        />
+      )}
 
       <Box display="flex" direction="column" grow overflow="hidden">
         {/* Error state */}
@@ -601,8 +689,8 @@ export default function ScenarioRoomPage({
               }}
             >
               {connectionError === "mic"
-                ? <Icon name="mic-off" size="lg" tone="inverse" />
-                : <Icon name="alert" size="lg" tone="inverse" />
+                ? <Icon name="volume-mute" size="lg" tone="inverse" />
+                : <Icon name="warning" size="lg" tone="inverse" />
               }
             </motion.div>
             <FadeIn delay={0.2}>
@@ -637,9 +725,10 @@ export default function ScenarioRoomPage({
         )}
 
         {/* Voice conversation — immersive layout */}
-        {!connectionError && !isComplete && (
+        {isLiveSession && (
           <div
             style={{
+              ...immersiveThemeStyle,
               display: "flex",
               flexDirection: "column",
               flex: 1,
@@ -647,6 +736,30 @@ export default function ScenarioRoomPage({
               overflow: "hidden",
             }}
           >
+            <Box
+              display="flex"
+              align="center"
+              justify="between"
+              px={8}
+              pt={6}
+              pb={4}
+              shrink
+            >
+              <button
+                type="button"
+                onClick={() => router.push("/scenario-rooms")}
+                title="Back to rooms"
+                style={pillButton({ active: false })}
+              >
+                <span aria-hidden="true">←</span>
+                <span>Back</span>
+              </button>
+              <Text variant="heading-xs">
+                {room.title}
+              </Text>
+              <span style={{ width: 68 }} />
+            </Box>
+
             {/* Top row: info-left · sphere-center · sub-goal-checklist-right */}
             <div
               style={{
@@ -681,8 +794,8 @@ export default function ScenarioRoomPage({
                     gap: 0,
                     padding: 2,
                     borderRadius: 999,
-                    background: "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
+                    border: "1px solid var(--tatva-border-secondary, rgba(255,255,255,0.14))",
                   }}
                   role="radiogroup"
                   aria-label="Difficulty"
@@ -711,7 +824,9 @@ export default function ScenarioRoomPage({
                           background: active
                             ? "linear-gradient(135deg, rgba(88,204,2,0.95), rgba(60,170,0,0.95))"
                             : "transparent",
-                          color: active ? "#fff" : "rgba(255,255,255,0.7)",
+                          color: active
+                            ? "var(--tatva-content-inverse, #fff)"
+                            : "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
                           transition: "background 0.15s, color 0.15s",
                         }}
                       >
@@ -732,7 +847,7 @@ export default function ScenarioRoomPage({
                   <span
                     style={{
                       fontSize: 11.5,
-                      color: "rgba(255,255,255,0.55)",
+                      color: "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
                       fontWeight: 500,
                     }}
                   >
@@ -750,7 +865,7 @@ export default function ScenarioRoomPage({
                       activeColor: "rgba(255,220,120,0.95)",
                     })}
                   >
-                    <Icon name={isMicMuted ? "mic-off" : "microphone"} size="sm" tone="secondary" />
+                    <Icon name={isMicMuted ? "volume-mute" : "microphone"} size="sm" tone="secondary" />
                     <span>{isMicMuted ? "Muted" : "Mute"}</span>
                   </button>
 
@@ -775,20 +890,22 @@ export default function ScenarioRoomPage({
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: 4,
-                      padding: "3px 10px",
+                      gap: 6,
+                      padding: "5px 12px",
                       borderRadius: 999,
-                      fontSize: 11,
-                      fontWeight: 600,
+                      minHeight: 28,
+                      fontSize: 11.5,
+                      fontWeight: 700,
                       cursor: "pointer",
-                      border: "1px solid rgba(255,90,90,0.55)",
-                      background: "rgba(255,90,90,0.14)",
-                      color: "rgba(255,180,180,0.95)",
-                      transition: "background 0.15s",
+                      border: "1px solid var(--tatva-danger-content, rgba(255,120,120,0.85))",
+                      background: "linear-gradient(135deg, rgba(255,90,90,0.22), rgba(230,65,65,0.26))",
+                      color: "var(--tatva-content-inverse, #fff)",
+                      boxShadow: "0 1px 8px rgba(255,90,90,0.2)",
+                      transition: "background 0.15s, transform 0.12s",
                     }}
                   >
                     <span aria-hidden="true">■</span>
-                    <span>End</span>
+                    <span>End session</span>
                   </button>
                 </div>
               </div>
@@ -863,7 +980,7 @@ export default function ScenarioRoomPage({
                     fontWeight: 700,
                     letterSpacing: 0.6,
                     textTransform: "uppercase",
-                    color: "rgba(255,255,255,0.5)",
+                    color: "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
                   }}
                 >
                   Goal
@@ -871,7 +988,7 @@ export default function ScenarioRoomPage({
                 <span
                   style={{
                     fontSize: 12.5,
-                    color: "rgba(255,255,255,0.85)",
+                    color: "var(--tatva-content-primary, rgba(255,255,255,0.94))",
                     lineHeight: 1.4,
                     fontStyle: "italic",
                     maxWidth: 240,
@@ -911,12 +1028,12 @@ export default function ScenarioRoomPage({
                           style={{
                             fontSize: 11.5,
                             color: done
-                              ? "rgba(255,255,255,0.92)"
-                              : "rgba(255,255,255,0.55)",
+                              ? "var(--tatva-content-primary, rgba(255,255,255,0.94))"
+                              : "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
                             lineHeight: 1.35,
                             textDecorationLine: done ? "line-through" : "none",
                             textDecorationStyle: "solid" as const,
-                            textDecorationColor: "rgba(255,255,255,0.4)",
+                            textDecorationColor: "var(--tatva-border-secondary, rgba(255,255,255,0.4))",
                             flex: 1,
                           }}
                         >
@@ -928,10 +1045,10 @@ export default function ScenarioRoomPage({
                             scale: done ? 1 : 0.85,
                             backgroundColor: done
                               ? "rgba(88,204,2,0.95)"
-                              : "rgba(255,255,255,0.06)",
+                              : "var(--tatva-background-primary, rgba(255,255,255,0.08))",
                             borderColor: done
                               ? "rgba(88,204,2,1)"
-                              : "rgba(255,255,255,0.2)",
+                              : "var(--tatva-border-primary, rgba(255,255,255,0.22))",
                           }}
                           transition={{
                             type: "spring",
@@ -946,7 +1063,7 @@ export default function ScenarioRoomPage({
                             height: 16,
                             borderRadius: 4,
                             border: "1px solid",
-                            color: "#fff",
+                            color: "var(--tatva-content-inverse, #fff)",
                             fontSize: 10.5,
                             flexShrink: 0,
                             marginTop: 1,
@@ -1005,7 +1122,7 @@ export default function ScenarioRoomPage({
                       width: 36,
                       height: 36,
                       borderRadius: "50%",
-                      border: "3px solid rgba(255,255,255,0.15)",
+                      border: "3px solid var(--tatva-border-secondary, rgba(255,255,255,0.14))",
                       borderTopColor: "rgba(88,204,2,0.9)",
                     }}
                   />
@@ -1019,6 +1136,8 @@ export default function ScenarioRoomPage({
               {!isJudging && judgeResult && judgeResult.stars === 0 && (
                 <CompletionTryAgain
                   reasons={judgeResult.reasons}
+                  plantedWords={plantedWords}
+                  onOpenGarden={() => router.push("/garden")}
                   onReplay={() => fullRestart()}
                   onBack={() => router.push("/scenario-rooms")}
                 />
@@ -1028,6 +1147,8 @@ export default function ScenarioRoomPage({
                 <CompletionSuccess
                   result={judgeResult}
                   difficulty={difficulty}
+                  plantedWords={plantedWords}
+                  onOpenGarden={() => router.push("/garden")}
                   onReplay={() => fullRestart()}
                   onBack={() => router.push("/scenario-rooms")}
                   onCopyTranscript={copyTranscript}
@@ -1086,10 +1207,14 @@ function pillButton({
     fontWeight: 600,
     cursor: disabled ? "not-allowed" : "pointer",
     border: active
-      ? `1px solid ${activeBorder ?? "rgba(255,255,255,0.4)"}`
-      : "1px solid rgba(255,255,255,0.18)",
-    background: active ? activeBg ?? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.06)",
-    color: active ? activeColor ?? "#fff" : "rgba(255,255,255,0.85)",
+      ? `1px solid ${activeBorder ?? "var(--tatva-border-primary, rgba(255,255,255,0.22))"}`
+      : "1px solid var(--tatva-border-secondary, rgba(255,255,255,0.14))",
+    background: active
+      ? activeBg ?? "var(--tatva-background-primary, rgba(255,255,255,0.08))"
+      : "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
+    color: active
+      ? activeColor ?? "var(--tatva-content-primary, rgba(255,255,255,0.94))"
+      : "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
     opacity: disabled ? 0.5 : 1,
     transition: "background 0.15s, border-color 0.15s",
   };
@@ -1119,10 +1244,12 @@ function BadgeRow({ label, earned, reason, delay, iconName }: BadgeRowProps) {
         gap: 12,
         padding: "12px 14px",
         borderRadius: 14,
-        background: earned ? "rgba(88,204,2,0.08)" : "rgba(255,255,255,0.04)",
+        background: earned
+          ? "rgba(88,204,2,0.08)"
+          : "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
         border: earned
           ? "1px solid rgba(88,204,2,0.3)"
-          : "1px solid rgba(255,255,255,0.08)",
+          : "1px solid var(--tatva-border-secondary, rgba(255,255,255,0.14))",
         width: "100%",
         maxWidth: 480,
       }}
@@ -1136,10 +1263,12 @@ function BadgeRow({ label, earned, reason, delay, iconName }: BadgeRowProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: earned ? "rgba(88,204,2,0.18)" : "rgba(255,255,255,0.05)",
+          background: earned
+            ? "rgba(88,204,2,0.18)"
+            : "var(--tatva-background-primary, rgba(255,255,255,0.08))",
           border: earned
             ? "1px solid rgba(88,204,2,0.5)"
-            : "1px solid rgba(255,255,255,0.12)",
+            : "1px solid var(--tatva-border-primary, rgba(255,255,255,0.22))",
           opacity: earned ? 1 : 0.55,
         }}
       >
@@ -1150,7 +1279,9 @@ function BadgeRow({ label, earned, reason, delay, iconName }: BadgeRowProps) {
           style={{
             fontSize: 13.5,
             fontWeight: 600,
-            color: earned ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)",
+            color: earned
+              ? "var(--tatva-content-primary, rgba(255,255,255,0.94))"
+              : "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
           }}
         >
           {label}
@@ -1158,7 +1289,7 @@ function BadgeRow({ label, earned, reason, delay, iconName }: BadgeRowProps) {
         <span
           style={{
             fontSize: 12,
-            color: "rgba(255,255,255,0.65)",
+            color: "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
             lineHeight: 1.4,
           }}
         >
@@ -1166,7 +1297,7 @@ function BadgeRow({ label, earned, reason, delay, iconName }: BadgeRowProps) {
         </span>
       </div>
       <Icon
-        name={earned ? "checkmark" : "minus-sign"}
+        name={earned ? "check" : "minus"}
         size="sm"
         tone={earned ? "success" : "tertiary"}
       />
@@ -1177,6 +1308,8 @@ function BadgeRow({ label, earned, reason, delay, iconName }: BadgeRowProps) {
 function CompletionSuccess({
   result,
   difficulty,
+  plantedWords,
+  onOpenGarden,
   onReplay,
   onBack,
   onCopyTranscript,
@@ -1184,6 +1317,8 @@ function CompletionSuccess({
 }: {
   result: JudgeResult;
   difficulty: SessionDifficulty;
+  plantedWords: { phrase: string; meaning: string; isNew: boolean }[];
+  onOpenGarden: () => void;
   onReplay: () => void;
   onBack: () => void;
   onCopyTranscript: () => void;
@@ -1210,7 +1345,7 @@ function CompletionSuccess({
               }}
               style={{
                 fontSize: 32,
-                color: s <= result.stars ? "#FFC800" : "rgba(255,255,255,0.18)",
+                color: s <= result.stars ? "#FFC800" : "var(--tatva-content-tertiary, rgba(255,255,255,0.38))",
               }}
             >
               ★
@@ -1241,7 +1376,7 @@ function CompletionSuccess({
             label="Goal"
             earned={result.badges.goal}
             reason={result.reasons.goal}
-            iconName="target"
+            iconName="activity"
             delay={0.05}
           />
         </StaggerItem>
@@ -1264,6 +1399,8 @@ function CompletionSuccess({
           />
         </StaggerItem>
       </StaggerContainer>
+
+      <MistakeGardenSummary plantedWords={plantedWords} onOpenGarden={onOpenGarden} />
 
       <FadeIn delay={0.55}>
         <Box display="flex" justify="center" gap={3}>
@@ -1290,10 +1427,14 @@ function CompletionSuccess({
 
 function CompletionTryAgain({
   reasons,
+  plantedWords,
+  onOpenGarden,
   onReplay,
   onBack,
 }: {
   reasons: JudgeResult["reasons"];
+  plantedWords: { phrase: string; meaning: string; isNew: boolean }[];
+  onOpenGarden: () => void;
   onReplay: () => void;
   onBack: () => void;
 }) {
@@ -1331,7 +1472,7 @@ function CompletionTryAgain({
         style={{ width: "100%" }}
       >
         {([
-          { label: "Goal", reason: reasons.goal, iconName: "target" as IconName },
+          { label: "Goal", reason: reasons.goal, iconName: "activity" as IconName },
           { label: "Language", reason: reasons.language, iconName: "chat" as IconName },
           { label: "Vocabulary", reason: reasons.vocab, iconName: "audio-book" as IconName },
         ] as const).map((row) =>
@@ -1344,8 +1485,8 @@ function CompletionTryAgain({
                 alignItems: "flex-start",
                 padding: "8px 12px",
                 borderRadius: 10,
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                background: "var(--tatva-surface-secondary, rgba(255,255,255,0.06))",
+                border: "1px solid var(--tatva-border-secondary, rgba(255,255,255,0.14))",
               }}
             >
               <div style={{ flexShrink: 0, marginTop: 1 }}>
@@ -1356,7 +1497,7 @@ function CompletionTryAgain({
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
-                    color: "rgba(255,255,255,0.85)",
+                    color: "var(--tatva-content-primary, rgba(255,255,255,0.94))",
                   }}
                 >
                   {row.label}
@@ -1364,7 +1505,7 @@ function CompletionTryAgain({
                 <span
                   style={{
                     fontSize: 12,
-                    color: "rgba(255,255,255,0.65)",
+                    color: "var(--tatva-content-secondary, rgba(255,255,255,0.8))",
                     lineHeight: 1.4,
                   }}
                 >
@@ -1375,6 +1516,7 @@ function CompletionTryAgain({
           ) : null
         )}
       </Box>
+      <MistakeGardenSummary plantedWords={plantedWords} onOpenGarden={onOpenGarden} />
       <Box display="flex" gap={3}>
         <HoverLift>
           <Button variant="outline" onClick={onBack}>
@@ -1386,6 +1528,75 @@ function CompletionTryAgain({
             Try again
           </Button>
         </HoverLift>
+      </Box>
+    </Box>
+  );
+}
+
+function MistakeGardenSummary({
+  plantedWords,
+  onOpenGarden,
+}: {
+  plantedWords: { phrase: string; meaning: string; isNew: boolean }[];
+  onOpenGarden: () => void;
+}) {
+  if (plantedWords.length === 0) return null;
+
+  return (
+    <Box
+      display="flex"
+      direction="column"
+      gap={3}
+      p={4}
+      rounded="md"
+      bg="surface-secondary"
+      borderColor="primary"
+      style={{ width: "100%", maxWidth: 520 }}
+    >
+      <Box display="flex" align="center" justify="between">
+        <Box display="flex" align="center" gap={2}>
+          <Icon name="plant" size="sm" tone="success" />
+          <Text variant="label-md">Mistake Garden updated</Text>
+        </Box>
+        <Badge variant="brand" size="sm">
+          {plantedWords.filter((item) => item.isNew).length} new
+        </Badge>
+      </Box>
+
+      <Box display="flex" direction="column" gap={2}>
+        {plantedWords.slice(0, 4).map((word) => (
+          <Box
+            key={word.phrase}
+            display="flex"
+            align="center"
+            justify="between"
+            p={3}
+            rounded="sm"
+            bg="surface-primary"
+            borderColor="secondary"
+          >
+            <Box display="flex" direction="column" gap={0}>
+              <Text variant="label-sm">{word.phrase}</Text>
+              <Text variant="body-xs" tone="secondary">
+                {word.meaning}
+              </Text>
+            </Box>
+            <Badge variant={word.isNew ? "green" : "default"} size="sm">
+              {word.isNew ? "Planted" : "Already in garden"}
+            </Badge>
+          </Box>
+        ))}
+        {plantedWords.length > 4 && (
+          <Text variant="body-xs" tone="tertiary">
+            +{plantedWords.length - 4} more phrases saved for review.
+          </Text>
+        )}
+      </Box>
+
+      <Box display="flex" justify="end">
+        <Button variant="outline" icon="arrow-right" onClick={onOpenGarden}>
+          Open Mistake Garden
+        </Button>
       </Box>
     </Box>
   );

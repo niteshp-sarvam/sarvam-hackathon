@@ -6,6 +6,8 @@ export interface SarvamAgentOptions extends AgentOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  firstTurnMinQuote?: number;
+  targetMax?: number;
 }
 
 const SARVAM_API_BASE = "https://api.sarvam.ai";
@@ -35,6 +37,11 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
         }
         return { role: m.role, content: m.content };
       });
+      const isFirstAssistantTurn = !raw.some((m) => m.role === "assistant");
+      const shouldGuardFirstPrice =
+        isFirstAssistantTurn &&
+        typeof this.options.firstTurnMinQuote === "number" &&
+        typeof this.options.targetMax === "number";
 
       // Prepend system prompt and enforce strict user/assistant alternation
       const messages: { role: string; content: string }[] = [];
@@ -92,6 +99,9 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       let insideBracket = false;
       let bracketBuf = "";
       const MAX_BRACKET_LEN = 320;
+      let insideParen = false;
+      let parenBuf = "";
+      const MAX_PAREN_LEN = 320;
 
       const writeToTTS = (raw: string) => {
         if (!raw) return;
@@ -108,9 +118,21 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
               insideBracket = false;
               bracketBuf = "";
             }
+          } else if (insideParen) {
+            parenBuf += ch;
+            if (ch === ")") {
+              insideParen = false;
+              parenBuf = "";
+            } else if (parenBuf.length > MAX_PAREN_LEN) {
+              insideParen = false;
+              parenBuf = "";
+            }
           } else if (ch === "[") {
             insideBracket = true;
             bracketBuf = "[";
+          } else if (ch === "(") {
+            insideParen = true;
+            parenBuf = "(";
           } else {
             out += ch;
           }
@@ -161,7 +183,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
                   text = "";
                 }
               }
-              if (!insideThink && text) {
+              if (!insideThink && text && !shouldGuardFirstPrice) {
                 writeToTTS(text);
               }
             }
@@ -181,7 +203,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
             const cleaned = content
               .replace(/<think>[\s\S]*?<\/think>/g, "")
               .trim();
-            if (cleaned) writeToTTS(cleaned);
+            if (cleaned && !shouldGuardFirstPrice) writeToTTS(cleaned);
           }
         } catch {
           // not parseable
@@ -189,7 +211,21 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       }
 
       // Strip think blocks for conversation storage
-      const cleanedMessage = fullMessage.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      let cleanedMessage = fullMessage.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      if (
+        shouldGuardFirstPrice &&
+        typeof this.options.firstTurnMinQuote === "number" &&
+        typeof this.options.targetMax === "number"
+      ) {
+        cleanedMessage = enforceFirstQuoteAboveTarget(
+          cleanedMessage,
+          this.options.firstTurnMinQuote,
+          this.options.targetMax
+        );
+      }
+      if (shouldGuardFirstPrice && cleanedMessage) {
+        writeToTTS(cleanedMessage);
+      }
       console.log(`[SarvamAgent] Response: "${cleanedMessage.slice(0, 150)}"`);
 
       if (cleanedMessage) {
@@ -213,4 +249,32 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
     this.abortController.abort();
     this.abortController = undefined;
   }
+}
+
+function enforceFirstQuoteAboveTarget(
+  text: string,
+  firstTurnMinQuote: number,
+  targetMax: number
+): string {
+  const lines = text.split("\n");
+  const spokenIdx = lines.findIndex(
+    (line) => line.trim().length > 0 && !line.trim().startsWith("[")
+  );
+  if (spokenIdx === -1) return text;
+
+  const spoken = lines[spokenIdx];
+  const match = spoken.match(/₹\s*\d+|\d+\s*(?:rupees?|rs|₹|रुपये|रुपए)/i);
+  const value = match?.[0]?.match(/\d+/)?.[0];
+  const quoted = value ? parseInt(value, 10) : NaN;
+
+  if (Number.isFinite(quoted) && quoted > targetMax) return text;
+
+  if (match && Number.isFinite(quoted)) {
+    lines[spokenIdx] = spoken.replace(match[0], `₹${firstTurnMinQuote}`);
+    return lines.join("\n");
+  }
+
+  const suffix = spoken.trim().endsWith(".") ? "" : ".";
+  lines[spokenIdx] = `${spoken}${suffix} ₹${firstTurnMinQuote}.`;
+  return lines.join("\n");
 }

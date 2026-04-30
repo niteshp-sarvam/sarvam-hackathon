@@ -46,6 +46,8 @@ wss.on("connection", (socket, req) => {
 
   const tempStr = url.searchParams.get("temperature");
   const maxTokStr = url.searchParams.get("maxTokens");
+  const firstTurnMinQuoteStr = url.searchParams.get("firstTurnMinQuote");
+  const targetMaxStr = url.searchParams.get("targetMax");
   const temperature =
     tempStr !== null && !Number.isNaN(parseFloat(tempStr))
       ? Math.max(0, Math.min(1.5, parseFloat(tempStr)))
@@ -54,9 +56,17 @@ wss.on("connection", (socket, req) => {
     maxTokStr !== null && !Number.isNaN(parseInt(maxTokStr, 10))
       ? Math.max(40, Math.min(512, parseInt(maxTokStr, 10)))
       : undefined;
+  const firstTurnMinQuote =
+    firstTurnMinQuoteStr !== null && !Number.isNaN(parseInt(firstTurnMinQuoteStr, 10))
+      ? Math.max(1, parseInt(firstTurnMinQuoteStr, 10))
+      : undefined;
+  const targetMax =
+    targetMaxStr !== null && !Number.isNaN(parseInt(targetMaxStr, 10))
+      ? Math.max(1, parseInt(targetMaxStr, 10))
+      : undefined;
 
   console.log(
-    `[voice-server] New connection: room=${roomId}, lang=${langCode}, temp=${temperature ?? "default"}, maxTokens=${maxTokens ?? "default"}`
+    `[voice-server] New connection: room=${roomId}, lang=${langCode}, temp=${temperature ?? "default"}, maxTokens=${maxTokens ?? "default"}, firstTurnMinQuote=${firstTurnMinQuote ?? "none"}, targetMax=${targetMax ?? "none"}`
   );
 
   const stt = new SarvamSTT({
@@ -76,6 +86,8 @@ wss.on("connection", (socket, req) => {
       `You are a helpful language learning assistant. Speak in the learner's target language.`,
     temperature,
     maxTokens,
+    firstTurnMinQuote,
+    targetMax,
     autoEndCall: true,
     autoIgnoreUserNoise: true,
   });
@@ -88,7 +100,7 @@ wss.on("connection", (socket, req) => {
     console.log(`[voice-server] [${roomId}] TTS audio chunk: ${buf.byteLength} bytes`);
   });
 
-  new MicdropServer(socket as any, {
+  new MicdropServer(socket as unknown as Parameters<typeof MicdropServer>[0], {
     agent,
     stt,
     tts,
