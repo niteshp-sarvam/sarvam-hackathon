@@ -1,4 +1,4 @@
-# BhashaVerse
+# Vaani
 
 **Learn Indian languages by living them.** An immersive language learning platform powered by Sarvam AI, built with psychology-grounded features that go far beyond flashcards and grammar drills.
 

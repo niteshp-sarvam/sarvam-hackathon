@@ -17,15 +17,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BhashaVerse — Learn Indian Languages by Living Them",
+  title: "Vaani — Learn Indian Languages by Living Them",
   description:
     "Immersive Indian language learning through identity, voice AI, and cultural scenarios. Powered by Sarvam AI.",
   manifest: "/manifest.json",
-  applicationName: "BhashaVerse",
+  applicationName: "Vaani",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "BhashaVerse",
+    title: "Vaani",
   },
   formatDetection: { telephone: false },
   icons: {

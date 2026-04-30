@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { LanguageCode } from "./constants";
 
-const CACHE_PREFIX = "bhashaverse:native:";
+const CACHE_PREFIX = "vaani:native:";
 const inflight = new Map<string, Promise<string>>();
 
 function cacheKey(roman: string, lang: LanguageCode | string) {

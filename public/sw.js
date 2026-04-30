@@ -1,6 +1,6 @@
 /* eslint-disable no-restricted-globals */
 /**
- * BhashaVerse service worker.
+ * Vaani service worker.
  *
  * Strategy:
  *  - Pre-cache the manifest, icons, and the offline shell on install.
@@ -12,8 +12,8 @@
  */
 
 const VERSION = "v1";
-const RUNTIME_CACHE = `bhashaverse-runtime-${VERSION}`;
-const ASSET_CACHE = `bhashaverse-assets-${VERSION}`;
+const RUNTIME_CACHE = `vaani-runtime-${VERSION}`;
+const ASSET_CACHE = `vaani-assets-${VERSION}`;
 
 const PRECACHE_URLS = [
   "/manifest.json",
@@ -72,7 +72,7 @@ async function networkFirstNavigation(request) {
     const shell = await cache.match("/");
     if (shell) return shell;
     return new Response(
-      "<h1>You are offline</h1><p>BhashaVerse needs a connection right now.</p>",
+      "<h1>You are offline</h1><p>Vaani needs a connection right now.</p>",
       { headers: { "Content-Type": "text/html" }, status: 503 }
     );
   }

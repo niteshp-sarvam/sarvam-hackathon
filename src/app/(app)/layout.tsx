@@ -7,7 +7,7 @@ import { useAppStore } from "@/lib/store";
 import { Box, Loader, Text } from "@sarvam/tatva";
 import { sync } from "@/lib/sync";
 
-const LOCALSTORAGE_KEY = "bhashaverse-store";
+const LOCALSTORAGE_KEY = "vaani-store";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();

@@ -1,5 +1,5 @@
 /**
- * Gamification color palette for BhashaVerse.
+ * Gamification color palette for Vaani.
  *
  * Tatva semantic tokens (positive/danger/warning/brand) drive the core UI, but
  * gamification features need richer, brand-specific accents — XP gold,

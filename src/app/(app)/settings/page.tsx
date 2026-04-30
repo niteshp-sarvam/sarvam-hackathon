@@ -123,7 +123,7 @@ export default function SettingsPage() {
           type="main"
           left={{
             title: "Settings",
-            subtitle: "Manage your BhashaVerse profile and preferences",
+            subtitle: "Manage your Vaani profile and preferences",
           }}
         />
         <div style={{ maxWidth: 672, overflow: "auto", flex: 1 }}>
@@ -159,7 +159,7 @@ export default function SettingsPage() {
         type="main"
         left={{
           title: "Settings",
-          subtitle: "Manage your BhashaVerse profile and preferences",
+          subtitle: "Manage your Vaani profile and preferences",
         }}
       />
 
@@ -466,7 +466,7 @@ export default function SettingsPage() {
               variant="destructive"
               onClick={() => {
                 if (confirm("Reset all progress? This cannot be undone.")) {
-                  localStorage.removeItem("bhashaverse-store");
+                  localStorage.removeItem("vaani-store");
                   setOnboarded(false);
                   router.push("/onboarding");
                 }
