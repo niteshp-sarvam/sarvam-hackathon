@@ -19,19 +19,16 @@ export default function AuthShell({ children }: { children: ReactNode }) {
         gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
       }}
     >
-      <Box
-        display="none"
-        direction="column"
-        justify="between"
-        p={16}
+      <div
+        className="auth-brand-panel"
         style={{
           position: "relative",
           background:
             "radial-gradient(900px 600px at 0% 0%, rgba(99,102,241,0.30) 0%, rgba(99,102,241,0) 60%), radial-gradient(800px 600px at 100% 100%, rgba(28,176,246,0.22) 0%, rgba(28,176,246,0) 60%), linear-gradient(135deg, #0F1530 0%, #161B3A 100%)",
           overflow: "hidden",
         }}
-        className="auth-brand-panel"
       >
+        <Box display="flex" direction="column" justify="between" p={16} style={{ minHeight: "100%" }}>
         <Box display="flex" align="center" gap={3}>
           <div
             style={{
@@ -102,7 +99,8 @@ export default function AuthShell({ children }: { children: ReactNode }) {
         >
           Hindi · Tamil · Telugu · Kannada · Malayalam · Bengali · Marathi · Gujarati
         </Text>
-      </Box>
+        </Box>
+      </div>
 
       <Box
         display="flex"
@@ -115,8 +113,9 @@ export default function AuthShell({ children }: { children: ReactNode }) {
       </Box>
 
       <style>{`
+        .auth-brand-panel { display: none; }
         @media (min-width: 880px) {
-          .auth-brand-panel { display: flex !important; }
+          .auth-brand-panel { display: flex !important; flex-direction: column; }
         }
         @media (max-width: 879px) {
           div[style*="grid-template-columns"] {

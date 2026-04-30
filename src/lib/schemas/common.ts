@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { SUPPORTED_LANGUAGES } from "@/lib/constants";
 
-const supportedLanguageCodes = new Set(
+const supportedLanguageCodes = new Set<string>(
   SUPPORTED_LANGUAGES.map((language) => language.code)
 );
 

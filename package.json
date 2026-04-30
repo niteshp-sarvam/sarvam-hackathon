@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "voice": "npx tsx watch voice-server.ts",
+    "voice:start": "npx tsx voice-server.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run voice\"",
     "test:sarvam": "npx tsx scripts/test-sarvam.ts",
     "build": "next build",
