@@ -90,7 +90,6 @@ export default function ScenarioRoomPage({
   const [isComplete, setIsComplete] = useState(false);
   const [judgeResult, setJudgeResult] = useState<JudgeResult | null>(null);
   const [isJudging, setIsJudging] = useState(false);
-  const [subGoalsHit, setSubGoalsHit] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [difficulty, setDifficulty] = useState<SessionDifficulty>("normal");
   const [sessionSeed, setSessionSeed] = useState<number>(() => randomSessionSeed());
@@ -109,8 +108,25 @@ export default function ScenarioRoomPage({
 
   const VOICE_SERVER_URL = process.env.NEXT_PUBLIC_VOICE_SERVER_URL ?? "ws://localhost:8081";
 
-  const voiceConversation = micdropState.conversation ?? [];
+  const voiceConversation = useMemo(
+    () => micdropState.conversation ?? [],
+    [micdropState.conversation]
+  );
   const voiceTurnCount = voiceConversation.filter((m) => m.role === "user").length;
+  const subGoalsHit = useMemo(() => {
+    let highest = 0;
+    for (const msg of voiceConversation) {
+      if (msg.role !== "assistant") continue;
+      const content = "content" in msg ? (msg.content ?? "") : "";
+      const matches = content.matchAll(/\[SUBGOAL:(\d+)\]/g);
+      for (const m of matches) {
+        const n = parseInt(m[1], 10);
+        if (!Number.isNaN(n) && n > highest) highest = n;
+      }
+    }
+    if (room && highest > room.subGoals.length) highest = room.subGoals.length;
+    return highest;
+  }, [voiceConversation, room]);
 
   const voiceStartedRef = useRef(false);
   const startingRef = useRef(false);
@@ -182,7 +198,7 @@ export default function ScenarioRoomPage({
       }))
       .filter((m) => m.content.trim().length > 0);
 
-    if (!room || !lang || !targetLanguage || transcriptForJudge.length === 0) {
+    if (!room || !lang || !targetLanguage) {
       setIsJudging(false);
       return;
     }
@@ -242,11 +258,11 @@ export default function ScenarioRoomPage({
         console.error("[ScenarioRoom] judge failed:", err);
         setIsJudging(false);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComplete, stopVoiceSession, voiceConversation, room, lang, targetLanguage, nativeLanguage, subGoalsHit, voiceTurnCount, difficulty, addScenarioResult, addActivity, addXp, completeLesson]);
 
   const retryConnection = useCallback(() => {
     setConnectionError(false);
+    setIsMicMuted(false);
     voiceStartedRef.current = false;
     setRestartKey((k) => k + 1);
   }, []);
@@ -261,8 +277,8 @@ export default function ScenarioRoomPage({
       setIsComplete(false);
       setJudgeResult(null);
       setIsJudging(false);
-      setSubGoalsHit(0);
       setTranscriptCopied(false);
+      setIsMicMuted(false);
       setSessionSeed(randomSessionSeed());
       if (nextDifficulty) setDifficulty(nextDifficulty);
       voiceStartedRef.current = false;
@@ -364,26 +380,10 @@ export default function ScenarioRoomPage({
   }, [voiceConversation]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTranscriptMessages([]);
     messageUidRef.current = 0;
   }, [restartKey]);
-
-  // Track [SUBGOAL:N] markers across the whole assistant stream and bump
-  // the `subGoalsHit` counter to the highest one seen.
-  useEffect(() => {
-    let highest = 0;
-    for (const msg of voiceConversation) {
-      if (msg.role !== "assistant") continue;
-      const content = "content" in msg ? (msg.content ?? "") : "";
-      const matches = content.matchAll(/\[SUBGOAL:(\d+)\]/g);
-      for (const m of matches) {
-        const n = parseInt(m[1], 10);
-        if (!Number.isNaN(n) && n > highest) highest = n;
-      }
-    }
-    if (room && highest > room.subGoals.length) highest = room.subGoals.length;
-    setSubGoalsHit((prev) => (highest > prev ? highest : prev));
-  }, [voiceConversation, room]);
 
   // ─── completion + judge orchestration ─────────────────────────────────
   useEffect(() => {
@@ -395,77 +395,10 @@ export default function ScenarioRoomPage({
     const hasComplete = lastAssistantContent.includes("[SCENARIO_COMPLETE]");
     const hasStars = /\[STARS:\d\]/.test(lastAssistantContent);
     if (!hasComplete && !hasStars) return;
-
-    judgingFiredRef.current = true;
-    setIsComplete(true);
-    setIsJudging(true);
-    stopVoiceSession();
-
-    const transcriptForJudge = voiceConversation
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: "content" in m ? (m.content ?? "") : "",
-      }))
-      .filter((m) => m.content.trim().length > 0);
-
-    judgeScenario({
-      room: room as ScenarioRoomLike,
-      targetLanguageCode: lang.code,
-      targetLanguageName: lang.name,
-      nativeLanguageName:
-        nativeLanguage === "en"
-          ? "English"
-          : SUPPORTED_LANGUAGES.find((l) => l.code === nativeLanguage)?.name ?? "English",
-      subGoalsHit,
-      transcript: transcriptForJudge,
-    })
-      .then((result) => {
-        setJudgeResult(result);
-        setIsJudging(false);
-
-        if (result.stars >= 1) {
-          setTimeout(() => fireConfetti(result.stars >= 2 ? "sides" : "center"), 300);
-
-          const userUtterances = transcriptForJudge
-            .filter((m) => m.role === "user")
-            .map((m) => m.content.replace(CONTROL_MARKERS_RE, "").trim())
-            .filter((t) => t.length > 0);
-          let engCount = 0;
-          for (const u of userUtterances) if (isEnglishLeaning(u)) engCount++;
-
-          addScenarioResult({
-            roomId: room.id,
-            stars: result.stars,
-            completedAt: new Date().toISOString(),
-            vocabUsed: voiceTurnCount,
-            engFallbackCount: engCount,
-          });
-          addActivity({
-            type: "scenario_completed",
-            id: room.id,
-            meta: { stars: result.stars, turns: voiceTurnCount, difficulty },
-          });
-
-          let linkedLessonFound = false;
-          const curriculum = getCurriculum(targetLanguage);
-          for (const unit of curriculum) {
-            for (const lesson of unit.lessons) {
-              if (lesson.linkedScenarioId === room.id) {
-                completeLesson(lesson.id, lesson.xpReward);
-                linkedLessonFound = true;
-              }
-            }
-          }
-          if (!linkedLessonFound) addXp(result.stars * 50);
-        }
-      })
-      .catch((err) => {
-        console.error("[ScenarioRoom] judge failed:", err);
-        setIsJudging(false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastAssistantContent]);
+    queueMicrotask(() => {
+      handleEndConversation();
+    });
+  }, [room, lang, targetLanguage, isComplete, lastAssistantContent, handleEndConversation]);
 
   useEffect(() => {
     return () => {
@@ -476,11 +409,6 @@ export default function ScenarioRoomPage({
       }
     };
   }, []);
-
-  // Reset local mute state on session restart so the new mic stream is unmuted.
-  useEffect(() => {
-    setIsMicMuted(false);
-  }, [restartKey]);
 
   // Force-resume the AudioContext if the browser suspended it. Without this,
   // agent audio chunks queue silently and the user hears nothing.
@@ -822,7 +750,7 @@ export default function ScenarioRoomPage({
                       activeColor: "rgba(255,220,120,0.95)",
                     })}
                   >
-                    <Icon name={isMicMuted ? "mic-off" : "mic"} size="sm" tone="secondary" />
+                    <Icon name={isMicMuted ? "mic-off" : "microphone"} size="sm" tone="secondary" />
                     <span>{isMicMuted ? "Muted" : "Mute"}</span>
                   </button>
 

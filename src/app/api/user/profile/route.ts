@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAuthUserId, unauthorized } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
+import { parseJsonBody } from "@/lib/schemas/parse";
+import { userProfileUpdateSchema } from "@/lib/schemas/user";
 
 export async function GET() {
   const userId = await getAuthUserId();
@@ -14,7 +16,10 @@ export async function PUT(req: Request) {
   const userId = await getAuthUserId();
   if (!userId) return unauthorized();
 
-  const { name, ...profileData } = await req.json();
+  const parsed = await parseJsonBody(req, userProfileUpdateSchema);
+  if (!parsed.success) return parsed.response;
+
+  const { name, ...profileData } = parsed.data;
 
   const profile = await prisma.userProfile.upsert({
     where: { userId },

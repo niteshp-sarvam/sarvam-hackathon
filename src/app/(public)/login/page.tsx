@@ -5,29 +5,37 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Box, Button, Input, Text } from "@sarvam/tatva";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import AuthShell from "@/components/AuthShell";
+import { loginSchema, type LoginInput } from "@/lib/schemas/auth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+  });
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
+  async function onSubmit(values: LoginInput) {
+    setSubmitError("");
 
     const res = await signIn("credentials", {
-      email,
-      password,
+      email: values.email,
+      password: values.password,
       redirect: false,
     });
 
     if (res?.error) {
-      setError("Invalid email or password");
-      setLoading(false);
+      setSubmitError("Invalid email or password");
       return;
     }
 
@@ -53,28 +61,42 @@ export default function LoginPage() {
         </Box>
 
         <form
-          onSubmit={handleSubmit}
+          onSubmit={handleSubmit(onSubmit)}
           style={{ display: "flex", flexDirection: "column", gap: 16 }}
         >
-          <Input
-            label="Email"
-            type="email"
-            size="md"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            error={error && !email ? "Email is required" : undefined}
+          <Controller
+            name="email"
+            control={control}
+            render={({ field }) => (
+              <Input
+                label="Email"
+                type="email"
+                size="md"
+                placeholder="you@example.com"
+                value={field.value}
+                onChange={(e) => field.onChange(e.target.value)}
+                onBlur={field.onBlur}
+                error={errors.email?.message}
+              />
+            )}
           />
 
           <Box display="flex" direction="column" gap={2}>
-            <Input
-              label="Password"
-              type="password"
-              size="md"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              error={error && !password ? "Password is required" : undefined}
+            <Controller
+              name="password"
+              control={control}
+              render={({ field }) => (
+                <Input
+                  label="Password"
+                  type="password"
+                  size="md"
+                  placeholder="Enter your password"
+                  value={field.value}
+                  onChange={(e) => field.onChange(e.target.value)}
+                  onBlur={field.onBlur}
+                  error={errors.password?.message}
+                />
+              )}
             />
             <Box display="flex" justify="end">
               <Text variant="body-xs" tone="tertiary">
@@ -83,9 +105,9 @@ export default function LoginPage() {
             </Box>
           </Box>
 
-          {error && (
+          {submitError && (
             <Text variant="body-sm" tone="danger">
-              {error}
+              {submitError}
             </Text>
           )}
 
@@ -94,7 +116,7 @@ export default function LoginPage() {
             size="lg"
             width="full"
             type="submit"
-            isLoading={loading}
+            isLoading={isSubmitting}
           >
             Sign in
           </Button>

@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getAuthUserId, unauthorized } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
+import { parseJsonBody } from "@/lib/schemas/parse";
+import { migratePayloadSchema } from "@/lib/schemas/user";
 
 export async function POST(req: Request) {
   const userId = await getAuthUserId();
   if (!userId) return unauthorized();
 
-  const body = await req.json();
+  const parsed = await parseJsonBody(req, migratePayloadSchema);
+  if (!parsed.success) return parsed.response;
+  const body = parsed.data;
 
   // Use sequential non-transactional operations to avoid Neon serverless timeout.
   // Migration is idempotent, so partial failure is safe to retry.
@@ -28,7 +32,7 @@ export async function POST(req: Request) {
         xp: p.xp ?? 0,
         level: p.level ?? 1,
         streak: p.streak ?? 0,
-        lastActiveDate: p.lastActiveDate ? new Date(p.lastActiveDate) : null,
+        lastActiveDate: p.lastActiveDate ?? null,
         foundationLessonIds: p.foundationLessonIds ?? [],
       },
       update: {
@@ -43,7 +47,7 @@ export async function POST(req: Request) {
         xp: p.xp ?? 0,
         level: p.level ?? 1,
         streak: p.streak ?? 0,
-        lastActiveDate: p.lastActiveDate ? new Date(p.lastActiveDate) : null,
+        lastActiveDate: p.lastActiveDate ?? null,
         foundationLessonIds: p.foundationLessonIds ?? [],
       },
     });
@@ -58,22 +62,22 @@ export async function POST(req: Request) {
 
   if (body.gardenCards?.length) {
     await prisma.gardenCard.createMany({
-      data: body.gardenCards.map((c: Record<string, unknown>) => ({
+      data: body.gardenCards.map((c) => ({
         userId,
-        word: c.word as string,
-        translation: c.translation as string,
-        language: c.language as string,
-        category: c.category as string,
-        stability: (c.stability as number) ?? 0,
-        difficulty: (c.difficulty as number) ?? 0,
-        elapsedDays: (c.elapsedDays as number) ?? 0,
-        scheduledDays: (c.scheduledDays as number) ?? 0,
-        reps: (c.reps as number) ?? 0,
-        lapses: (c.lapses as number) ?? 0,
-        state: (c.state as string) ?? "new",
-        gardenStage: (c.gardenStage as string) ?? "seed",
-        lastReview: c.lastReview ? new Date(c.lastReview as string) : null,
-        nextReview: c.nextReview ? new Date(c.nextReview as string) : new Date(),
+        word: c.word,
+        translation: c.translation,
+        language: c.language,
+        category: c.category,
+        stability: c.stability ?? 0,
+        difficulty: c.difficulty ?? 0,
+        elapsedDays: c.elapsedDays ?? 0,
+        scheduledDays: c.scheduledDays ?? 0,
+        reps: c.reps ?? 0,
+        lapses: c.lapses ?? 0,
+        state: c.state ?? "new",
+        gardenStage: c.gardenStage ?? "seed",
+        lastReview: c.lastReview ?? null,
+        nextReview: c.nextReview ?? new Date(),
       })),
       skipDuplicates: true,
     });
@@ -87,7 +91,7 @@ export async function POST(req: Request) {
           userId,
           roomId: r.roomId,
           stars: r.stars,
-          completedAt: r.completedAt ? new Date(r.completedAt) : new Date(),
+          completedAt: r.completedAt ?? new Date(),
           vocabUsed: r.vocabUsed ?? 0,
           engFallbackCount: r.engFallbackCount ?? 0,
         },
@@ -100,18 +104,17 @@ export async function POST(req: Request) {
 
   if (body.lessonProgress) {
     for (const [lessonId, lp] of Object.entries(body.lessonProgress)) {
-      const progress = lp as { status: string; completedAt?: string; xpEarned?: number };
       await prisma.lessonProgress.upsert({
         where: { userId_lessonId: { userId, lessonId } },
         create: {
           userId,
           lessonId,
-          status: progress.status,
-          completedAt: progress.completedAt ? new Date(progress.completedAt) : null,
-          xpEarned: progress.xpEarned ?? null,
+          status: lp.status,
+          completedAt: lp.completedAt ?? null,
+          xpEarned: lp.xpEarned ?? null,
         },
         update: {
-          status: progress.status,
+          status: lp.status,
         },
       });
     }
@@ -124,7 +127,7 @@ export async function POST(req: Request) {
         create: {
           userId,
           milestoneId,
-          achievedAt: new Date(achievedAt as string),
+          achievedAt,
         },
         update: {},
       });
@@ -143,12 +146,12 @@ export async function POST(req: Request) {
 
   if (body.activityLog?.length) {
     await prisma.activityLogEntry.createMany({
-      data: body.activityLog.slice(-100).map((a: Record<string, unknown>) => ({
+      data: body.activityLog.slice(-100).map((a) => ({
         userId,
-        type: a.type as string,
-        referenceId: a.id as string | undefined,
-        meta: (a.meta as string) ?? undefined,
-        createdAt: a.ts ? new Date(a.ts as string) : new Date(),
+        type: a.type,
+        referenceId: a.id,
+        meta: a.meta ?? undefined,
+        createdAt: a.ts ?? new Date(),
       })),
       skipDuplicates: true,
     });

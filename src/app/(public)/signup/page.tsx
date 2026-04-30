@@ -5,62 +5,58 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Box, Button, Input, Text } from "@sarvam/tatva";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import AuthShell from "@/components/AuthShell";
+import { registerSchema, type RegisterInput } from "@/lib/schemas/auth";
 
 export default function SignupPage() {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterInput>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+    },
+  });
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-
-    if (!email || !password) {
-      setError("Email and password are required");
-      return;
-    }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
-      return;
-    }
-
-    setLoading(true);
+  async function onSubmit(values: RegisterInput) {
+    setSubmitError("");
 
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify(values),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Registration failed");
-        setLoading(false);
+        setSubmitError(data.error || "Registration failed");
         return;
       }
 
       const signInRes = await signIn("credentials", {
-        email,
-        password,
+        email: values.email,
+        password: values.password,
         redirect: false,
       });
 
       if (signInRes?.error) {
-        setError("Account created but sign-in failed. Please try logging in.");
-        setLoading(false);
+        setSubmitError("Account created but sign-in failed. Please try logging in.");
         return;
       }
 
       router.push("/onboarding");
     } catch {
-      setError("Something went wrong. Please try again.");
-      setLoading(false);
+      setSubmitError("Something went wrong. Please try again.");
     }
   }
 
@@ -83,46 +79,64 @@ export default function SignupPage() {
         </Box>
 
         <form
-          onSubmit={handleSubmit}
+          onSubmit={handleSubmit(onSubmit)}
           style={{ display: "flex", flexDirection: "column", gap: 16 }}
         >
-          <Input
-            label="Name"
-            type="text"
-            size="md"
-            placeholder="Your name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+          <Controller
+            name="name"
+            control={control}
+            render={({ field }) => (
+              <Input
+                label="Name"
+                type="text"
+                size="md"
+                placeholder="Your name"
+                value={field.value ?? ""}
+                onChange={(e) => field.onChange(e.target.value)}
+                onBlur={field.onBlur}
+                error={errors.name?.message}
+              />
+            )}
           />
 
-          <Input
-            label="Email"
-            type="email"
-            size="md"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            error={error && !email ? "Email is required" : undefined}
+          <Controller
+            name="email"
+            control={control}
+            render={({ field }) => (
+              <Input
+                label="Email"
+                type="email"
+                size="md"
+                placeholder="you@example.com"
+                value={field.value}
+                onChange={(e) => field.onChange(e.target.value)}
+                onBlur={field.onBlur}
+                error={errors.email?.message}
+              />
+            )}
           />
 
-          <Input
-            label="Password"
-            type="password"
-            size="md"
-            placeholder="At least 6 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            error={
-              error && password.length > 0 && password.length < 6
-                ? "Password must be at least 6 characters"
-                : undefined
-            }
-            helperText={!error ? "Use 6 or more characters" : undefined}
+          <Controller
+            name="password"
+            control={control}
+            render={({ field }) => (
+              <Input
+                label="Password"
+                type="password"
+                size="md"
+                placeholder="At least 6 characters"
+                value={field.value}
+                onChange={(e) => field.onChange(e.target.value)}
+                onBlur={field.onBlur}
+                error={errors.password?.message}
+                helperText={!errors.password ? "Use 6 or more characters" : undefined}
+              />
+            )}
           />
 
-          {error && (
+          {submitError && (
             <Text variant="body-sm" tone="danger">
-              {error}
+              {submitError}
             </Text>
           )}
 
@@ -131,7 +145,7 @@ export default function SignupPage() {
             size="lg"
             width="full"
             type="submit"
-            isLoading={loading}
+            isLoading={isSubmitting}
           >
             Create account
           </Button>

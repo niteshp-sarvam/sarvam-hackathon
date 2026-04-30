@@ -3,7 +3,6 @@
 import { usePathname, useRouter } from "next/navigation";
 import { Box, Sidebar, SidebarProvider } from "@sarvam/tatva";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { useAppStore } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
@@ -13,18 +12,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const identity = useAppStore((s) => s.identity);
   const { resolvedMode, toggle: toggleTheme } = useTheme();
-  const [defaultSidebarOpen, setDefaultSidebarOpen] = useState(true);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setDefaultSidebarOpen(window.innerWidth >= 768);
-    }
-  }, []);
 
   return (
-    <SidebarProvider defaultOpen={defaultSidebarOpen}>
+    <SidebarProvider>
       <div className="flex h-svh overflow-hidden bg-tatva-surface-primary">
         <Sidebar
+          defaultOpen={false}
           header={{
             logo: "/logo.svg",
             logoAlt: "BhashaVerse",
@@ -97,7 +90,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <Box
           display="flex"
           direction="column"
-          m={6}
+          m={4}
           grow
           minW="0"
           overflow="hidden"
@@ -105,7 +98,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           bg="surface-secondary"
           style={{ boxShadow: "var(--tatva-shadow-l1, 0 1px 3px rgba(0,0,0,.1))" }}
         >
-          <Box as="main" grow overflow="auto" p={12}>
+          <Box as="main" grow overflow="auto" p={10}>
             {children}
           </Box>
         </Box>

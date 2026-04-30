@@ -2,15 +2,16 @@ import { NextResponse } from "next/server";
 import { getAuthUserId, unauthorized } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { IDENTITY_LEVELS } from "@/lib/constants";
+import { parseJsonBody } from "@/lib/schemas/parse";
+import { xpIncrementSchema } from "@/lib/schemas/user";
 
 export async function POST(req: Request) {
   const userId = await getAuthUserId();
   if (!userId) return unauthorized();
 
-  const { amount } = await req.json();
-  if (typeof amount !== "number" || amount <= 0) {
-    return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(req, xpIncrementSchema);
+  if (!parsed.success) return parsed.response;
+  const { amount } = parsed.data;
 
   const profile = await prisma.userProfile.upsert({
     where: { userId },
