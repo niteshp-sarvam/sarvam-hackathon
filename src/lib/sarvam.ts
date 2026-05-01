@@ -40,7 +40,7 @@ export async function chatCompletion(
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
-      model: options?.model ?? "sarvam-m",
+      model: options?.model ?? "sarvam-105b",
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.max_tokens ?? 1024,

@@ -11,7 +11,7 @@ export interface SarvamAgentOptions extends AgentOptions {
 }
 
 const SARVAM_API_BASE = "https://api.sarvam.ai";
-const DEFAULT_MODEL = "sarvam-m";
+const DEFAULT_MODEL = "sarvam-105b";
 
 /**
  * Sarvam AI chat completion agent with streaming support.

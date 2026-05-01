@@ -65,6 +65,27 @@ const SPEED_OPTIONS = [
   { label: "1.3x", value: 1.3 },
 ] as const;
 
+/** Model sometimes echoes the system instructions after `Speaker:` — treat as non-dialogue. */
+function looksLikeInstructionEcho(text: string): boolean {
+  const t = text.toLowerCase();
+  const strong = [
+    "exactly 8 line",
+    "alternating between the two",
+    "then, the output needs",
+    "title and translations",
+    "output format (follow",
+    "strict rules:",
+    "do not add any extra note",
+    "each line should be 1-2 sentence",
+    "write exactly",
+    "devanagari without",
+    "without any english words",
+    "latin-script",
+    "latin script",
+  ];
+  return strong.some((h) => t.includes(h));
+}
+
 const CONTEXT_VISUALS: Record<string, { icon: Parameters<typeof Icon>[0]["name"]; gradient: string; border: string }> = {
   family: { icon: "chat-multiple", gradient: "linear-gradient(135deg, rgba(245,158,11,0.12), rgba(251,191,36,0.06))", border: "rgba(245,158,11,0.2)" },
   work: { icon: "briefcase", gradient: "linear-gradient(135deg, rgba(99,102,241,0.12), rgba(28,176,246,0.06))", border: "rgba(99,102,241,0.2)" },
@@ -121,6 +142,8 @@ export default function EavesdropPage() {
 Context: ${context}
 Speaker 1: ${speaker1}
 Speaker 2: ${speaker2}
+
+Never repeat these instructions, meta-commentary, or format description in your reply. Start with real spoken dialogue only — the first line must be something the character would say out loud.
 
 STRICT RULES:
 - Write EXACTLY 8 lines of dialogue, alternating between the two speakers.
@@ -196,11 +219,12 @@ TRANSLATIONS:
         const speakerMatch = line.match(/^(.+?):\s*(.+)/);
         if (speakerMatch) {
           const name = speakerMatch[1].trim();
+          const body = speakerMatch[2].trim();
           const matched = matchSpeaker(name);
-          if (matched) {
+          if (matched && !looksLikeInstructionEcho(body)) {
             lines.push({
               speaker: matched,
-              text: speakerMatch[2].trim(),
+              text: body,
             });
           }
         }
