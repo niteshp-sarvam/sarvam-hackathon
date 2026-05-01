@@ -352,11 +352,19 @@ ${sceneGuidance}
 ═══════════════════════════════════════════
 OUTPUT FORMAT — follow EXACTLY for every turn
 ═══════════════════════════════════════════
-1. FIRST line(s): your in-character spoken reply in ${lang.name}. 1-3 sentences. This is what the learner hears. Never empty. Never use square brackets in this part.
-2. THEN, on new lines, optionally these markers IN THIS ORDER (each on its own line):
+Wrap your in-character spoken reply inside <speak> tags. This is the ONLY text the learner will hear. Everything outside <speak> is silently discarded.
+
+<speak>
+Your 1-3 sentence in-character spoken reply in ${lang.name} goes here. No markdown, no English meta-commentary, no bullet lists, no reasoning — pure spoken dialogue only.
+</speak>
+
+After the closing </speak> tag, optionally include these markers IN THIS ORDER (each on its own line):
 ${optionalMarkerBlock}
 
-DO NOT include [STARS:N] — scoring is handled by a separate judge.
-NEVER reply with only marker lines. The spoken reply must always come first and never be empty.
-NEVER break character. Never refer to yourself as an AI or assistant.`;
+RULES:
+- The <speak> block MUST appear in every reply and MUST NOT be empty.
+- Never put markers, reasoning, chain-of-thought, or English commentary inside <speak>.
+- Never put spoken dialogue outside <speak>.
+- DO NOT include [STARS:N] — scoring is handled by a separate judge.
+- NEVER break character. Never refer to yourself as an AI or assistant.`;
 }

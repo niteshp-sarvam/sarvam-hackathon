@@ -36,20 +36,33 @@ export async function chatCompletion(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
   options?: { model?: string; temperature?: number; max_tokens?: number }
 ) {
-  const res = await fetchWithRetry(`${SARVAM_API_BASE}/v1/chat/completions`, {
+  const groqKey = process.env.GROQ_API_KEY;
+  const useGroq = !!groqKey;
+
+  const url = useGroq
+    ? "https://api.groq.com/openai/v1/chat/completions"
+    : `${SARVAM_API_BASE}/v1/chat/completions`;
+
+  const reqHeaders = useGroq
+    ? { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` }
+    : headers();
+
+  const body: Record<string, unknown> = {
+    model: useGroq ? "llama-3.3-70b-versatile" : (options?.model ?? "sarvam-105b"),
+    messages,
+    temperature: options?.temperature ?? 0.7,
+  };
+  if (options?.max_tokens) body.max_tokens = options.max_tokens;
+  if (!useGroq) body.reasoning_effort = null;
+
+  const res = await fetchWithRetry(url, {
     method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      model: options?.model ?? "sarvam-105b",
-      messages,
-      temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.max_tokens ?? 1024,
-      reasoning_effort: null,
-    }),
+    headers: reqHeaders,
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    throw new Error(`Sarvam Chat API error: ${res.status} ${errBody}`);
+    throw new Error(`Chat API error (${useGroq ? "Groq" : "Sarvam"}): ${res.status} ${errBody}`);
   }
   return res.json();
 }

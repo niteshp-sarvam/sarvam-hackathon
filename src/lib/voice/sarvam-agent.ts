@@ -1,99 +1,83 @@
 import { Agent, AgentOptions } from "@micdrop/server";
 import { PassThrough } from "stream";
 
-export interface SarvamAgentOptions extends AgentOptions {
+export interface LlmConfig {
+  apiBase: string;
   apiKey: string;
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  firstTurnMinQuote?: number;
-  targetMax?: number;
-  /**
-   * When true (default), streams tokens to TTS as they arrive — lowest time-to-first-audio.
-   * Set false (voice server: `?llmStream=0`) for a single non-stream completion (slower but avoids empty `delta.content`).
-   */
-  llmStream?: boolean;
+  model: string;
+  authStyle: "bearer" | "sarvam";
 }
 
-const SARVAM_API_BASE = "https://api.sarvam.ai";
-const DEFAULT_MODEL = "sarvam-105b";
+export interface SarvamAgentOptions extends AgentOptions {
+  apiKey: string;
+  temperature?: number;
+  firstTurnMinQuote?: number;
+  targetMax?: number;
+  llmStream?: boolean;
+  llm?: LlmConfig;
+}
+
+const SARVAM_LLM: LlmConfig = {
+  apiBase: "https://api.sarvam.ai",
+  apiKey: "",
+  model: "sarvam-105b",
+  authStyle: "sarvam",
+};
 
 /**
- * Sarvam AI chat completion for Micdrop → TTS.
- * Default: SSE streaming with `reasoning_effort: null` for fast time-to-first-audio.
- * Set `llmStream: false` for non-streaming (waits for full `message.content` first).
+ * Voice agent for Micdrop. LLM backend is configurable via `llm` option
+ * (defaults to Sarvam; pass Groq config for fast Llama inference).
+ *
+ * System prompt enforces `<speak>...</speak>` — only content inside those
+ * tags reaches TTS. Everything else is structurally invisible.
  */
 export class SarvamAgent extends Agent<SarvamAgentOptions> {
   private abortController?: AbortController;
+  private llm: LlmConfig;
 
   constructor(options: SarvamAgentOptions) {
     super(options);
+    this.llm = options.llm ?? { ...SARVAM_LLM, apiKey: options.apiKey };
   }
 
-  /** Non-stream completion; `generous` uses a larger token budget for retries after a failed stream. */
+  private buildHeaders(): Record<string, string> {
+    return this.llm.authStyle === "bearer"
+      ? { "Content-Type": "application/json", Authorization: `Bearer ${this.llm.apiKey}` }
+      : { "Content-Type": "application/json", "api-subscription-key": this.llm.apiKey };
+  }
+
+  private buildBody(messages: { role: string; content: string }[], stream: boolean) {
+    const body: Record<string, unknown> = {
+      model: this.llm.model,
+      messages,
+      temperature: this.options.temperature ?? 0.7,
+      stream,
+    };
+    if (this.llm.authStyle === "sarvam") {
+      body.reasoning_effort = null;
+    }
+    return body;
+  }
+
   private async fetchNonStreamCompletion(
     messages: { role: string; content: string }[],
-    signal: AbortSignal,
-    opts?: { generous?: boolean }
+    signal: AbortSignal
   ): Promise<string> {
-    const base = this.options.maxTokens ?? 1024;
-    const maxTok = opts?.generous
-      ? Math.min(8192, Math.max(4096, Math.floor(base * 3)))
-      : Math.min(8192, Math.max(2048, Math.floor(base * 2)));
-    const res = await fetch(`${SARVAM_API_BASE}/v1/chat/completions`, {
+    const res = await fetch(`${this.llm.apiBase}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-subscription-key": this.options.apiKey,
-      },
-      body: JSON.stringify({
-        model: this.options.model ?? DEFAULT_MODEL,
-        messages,
-        temperature: this.options.temperature ?? 0.7,
-        max_tokens: maxTok,
-        reasoning_effort: null,
-        stream: false,
-      }),
+      headers: this.buildHeaders(),
+      body: JSON.stringify(this.buildBody(messages, false)),
       signal,
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
-      console.warn(
-        "[SarvamAgent] Non-stream request failed:",
-        res.status,
-        errBody.slice(0, 240)
-      );
+      console.warn("[SarvamAgent] Non-stream request failed:", res.status, errBody.slice(0, 240));
       return "";
     }
     const json = (await res.json()) as {
-      choices?: Array<{
-        finish_reason?: string;
-        message?: {
-          content?: string | null;
-          reasoning_content?: string | null;
-        };
-      }>;
+      choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }>;
     };
-    const ch = json.choices?.[0];
-    const msg = ch?.message;
-    const content = (msg?.content ?? "").trim();
-    if (content) return content;
-    const reasoning = (msg?.reasoning_content ?? "").trim();
-    if (reasoning) {
-      const spoken = pickSpokenFallbackFromReasoning(reasoning);
-      if (spoken) {
-        console.warn(
-          "[SarvamAgent] message.content empty; using reasoning tail for speech (finish:",
-          ch?.finish_reason ?? "?",
-          ")"
-        );
-        return spoken;
-      }
-    }
-    if (ch) {
-      console.warn("[SarvamAgent] Empty choice (no content / no usable reasoning)", ch.finish_reason);
-    }
-    return "";
+    return (json.choices?.[0]?.message?.content ?? "").trim();
   }
 
   protected async generateAnswer(stream: PassThrough): Promise<void> {
@@ -116,16 +100,15 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
         typeof this.options.firstTurnMinQuote === "number" &&
         typeof this.options.targetMax === "number";
 
-      // Prepend system prompt and enforce strict user/assistant alternation
       const messages: { role: string; content: string }[] = [];
       if (this.options.systemPrompt) {
         messages.push({ role: "system", content: this.options.systemPrompt });
       }
       for (const m of raw) {
         if (m.role === "system") continue;
-        const prev = messages[messages.length - 1];
-        if (prev && prev.role === m.role) {
-          prev.content += " " + m.content;
+        const last = messages[messages.length - 1];
+        if (last && last.role === m.role) {
+          last.content += " " + m.content;
         } else {
           messages.push(m);
         }
@@ -134,36 +117,22 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       console.log("[SarvamAgent] Sending messages:", JSON.stringify(messages.map(m => ({ role: m.role, content: m.content.slice(0, 60) }))));
 
       const useLlmStream = this.options.llmStream !== false;
+
       if (!useLlmStream) {
-        let fullMessage = await this.fetchNonStreamCompletion(
-          messages,
-          abortController.signal
-        );
-        if (!fullMessage.trim() && abortController === this.abortController) {
-          console.warn("[SarvamAgent] Empty non-stream reply — retry with larger token budget");
-          fullMessage = await this.fetchNonStreamCompletion(messages, abortController.signal, {
-            generous: true,
-          });
-        }
-        let cleanedMessage = fullMessage
-          .replace(/<think>[\s\S]*?<\/redacted_thinking>/g, "")
-          .trim();
+        const fullMessage = await this.fetchNonStreamCompletion(messages, abortController.signal);
+
+        let spoken = extractSpeak(fullMessage);
         if (
           shouldGuardFirstPrice &&
           typeof this.options.firstTurnMinQuote === "number" &&
           typeof this.options.targetMax === "number"
         ) {
-          cleanedMessage = enforceFirstQuoteAboveTarget(
-            cleanedMessage,
-            this.options.firstTurnMinQuote,
-            this.options.targetMax
-          );
+          spoken = enforceFirstQuoteAboveTarget(spoken, this.options.firstTurnMinQuote, this.options.targetMax);
         }
-        const forTts = stripTtsControlMarkers(cleanedMessage);
-        if (forTts) stream.write(forTts);
-        console.log(`[SarvamAgent] Response (non-stream): "${cleanedMessage.slice(0, 150)}"`);
-        if (cleanedMessage) {
-          const { message, metadata } = this.extract(cleanedMessage);
+        if (spoken) stream.write(spoken);
+        console.log(`[SarvamAgent] Response (non-stream): "${spoken.slice(0, 150)}"`);
+        if (fullMessage) {
+          const { message, metadata } = this.extract(fullMessage);
           this.addAssistantMessage(message, metadata);
         }
         stream.end();
@@ -171,22 +140,10 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
         return;
       }
 
-      const res = await fetch(`${SARVAM_API_BASE}/v1/chat/completions`, {
+      const res = await fetch(`${this.llm.apiBase}/v1/chat/completions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-subscription-key": this.options.apiKey,
-        },
-        body: JSON.stringify({
-          model: this.options.model ?? DEFAULT_MODEL,
-          messages,
-          // Lowered defaults: scenarios want tight, alive 1-3 sentence replies.
-          // Old defaults (0.7 / 1024) encouraged the model to monologue.
-          temperature: this.options.temperature ?? 0.7,
-          max_tokens: this.options.maxTokens ?? 1024,
-          reasoning_effort: null,
-          stream: true,
-        }),
+        headers: this.buildHeaders(),
+        body: JSON.stringify(this.buildBody(messages, true)),
         signal: abortController.signal,
       });
 
@@ -196,80 +153,29 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       }
 
       const reader = res.body?.getReader();
-      if (!reader) {
-        throw new Error("No response body");
-      }
+      if (!reader) throw new Error("No response body");
 
       const decoder = new TextDecoder();
       let fullMessage = "";
-      let buffer = "";
-      let insideThink = false;
-      // Bracket filter state — suppresses `[...]` markers (e.g. [SUGGEST:...],
-      // [STARS:N], [SCENARIO_COMPLETE]) from the TTS stream so the agent doesn't
-      // read them aloud. Markers may span chunk boundaries.
-      let insideBracket = false;
-      let bracketBuf = "";
-      const MAX_BRACKET_LEN = 320;
-      let insideParen = false;
-      let parenBuf = "";
-      const MAX_PAREN_LEN = 320;
+      let sseBuffer = "";
       let streamedAudio = false;
 
-      const writeToTTS = (raw: string) => {
-        if (!raw) return;
-        let out = "";
-        for (const ch of raw) {
-          if (insideBracket) {
-            bracketBuf += ch;
-            if (ch === "]") {
-              // bracket closed — drop the buffered marker content entirely
-              insideBracket = false;
-              bracketBuf = "";
-            } else if (bracketBuf.length > MAX_BRACKET_LEN) {
-              // bracket never closed — abandon suppression to avoid stalling
-              insideBracket = false;
-              bracketBuf = "";
-            }
-          } else if (insideParen) {
-            parenBuf += ch;
-            if (ch === ")") {
-              insideParen = false;
-              parenBuf = "";
-            } else if (parenBuf.length > MAX_PAREN_LEN) {
-              insideParen = false;
-              parenBuf = "";
-            }
-          } else if (ch === "[") {
-            insideBracket = true;
-            bracketBuf = "[";
-          } else if (ch === "(") {
-            insideParen = true;
-            parenBuf = "(";
-          } else {
-            out += ch;
-          }
-        }
-        if (out) {
-          stream.write(out);
-          streamedAudio = true;
-        }
-      };
+      // State machine for <speak> tag parsing across chunk boundaries
+      const tagParser = new SpeakTagStreamParser();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         if (abortController !== this.abortController) return;
 
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() ?? "";
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith("data: ")) continue;
           const data = trimmed.slice(6);
-
           if (data === "[DONE]") break;
 
           try {
@@ -278,85 +184,53 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
             if (delta) {
               fullMessage += delta;
 
-              // Strip <think>...</think> blocks from TTS stream
-              let text = delta;
-              if (insideThink) {
-                const endIdx = text.indexOf("</think>");
-                if (endIdx !== -1) {
-                  insideThink = false;
-                  text = text.slice(endIdx + 8);
-                } else {
-                  text = "";
+              if (!shouldGuardFirstPrice) {
+                const audible = tagParser.feed(delta);
+                if (audible) {
+                  stream.write(audible);
+                  streamedAudio = true;
                 }
-              }
-              if (!insideThink) {
-                const startIdx = text.indexOf("<think>");
-                if (startIdx !== -1) {
-                  insideThink = true;
-                  const before = text.slice(0, startIdx);
-                  if (before) writeToTTS(before);
-                  text = "";
-                }
-              }
-              if (!insideThink && text && !shouldGuardFirstPrice) {
-                writeToTTS(text);
               }
             }
           } catch {
-            // malformed JSON chunk, skip
+            // malformed SSE chunk
           }
         }
       }
 
-      // If streaming didn't work (non-streaming response), parse as regular JSON
-      if (!fullMessage && buffer.trim()) {
+      // Non-streaming fallback if SSE returned a single JSON body
+      if (!fullMessage && sseBuffer.trim()) {
         try {
-          const parsed = JSON.parse(buffer);
+          const parsed = JSON.parse(sseBuffer);
           const content = parsed.choices?.[0]?.message?.content ?? "";
-          if (content) {
-            fullMessage = content;
-            const cleaned = content
-              .replace(/<think>[\s\S]*?<\/redacted_thinking>/g, "")
-              .trim();
-            if (cleaned && !shouldGuardFirstPrice) writeToTTS(cleaned);
-          }
+          if (content) fullMessage = content;
         } catch {
           // not parseable
         }
       }
 
       if (!fullMessage.trim() && abortController === this.abortController) {
-        console.warn(
-          "[SarvamAgent] Empty stream content — non-stream fallback (reasoning may have used the token budget)"
-        );
-        const fb = await this.fetchNonStreamCompletion(messages, abortController.signal, {
-          generous: true,
-        });
+        console.warn("[SarvamAgent] Empty stream — non-stream fallback");
+        const fb = await this.fetchNonStreamCompletion(messages, abortController.signal);
         if (fb) fullMessage = fb;
       }
 
-      // Strip think / reasoning wrapper blocks for conversation + TTS
-      let cleanedMessage = fullMessage
-        .replace(/<think>[\s\S]*?<\/redacted_thinking>/g, "")
-        .trim();
+      let spoken = extractSpeak(fullMessage);
       if (
         shouldGuardFirstPrice &&
         typeof this.options.firstTurnMinQuote === "number" &&
         typeof this.options.targetMax === "number"
       ) {
-        cleanedMessage = enforceFirstQuoteAboveTarget(
-          cleanedMessage,
-          this.options.firstTurnMinQuote,
-          this.options.targetMax
-        );
+        spoken = enforceFirstQuoteAboveTarget(spoken, this.options.firstTurnMinQuote, this.options.targetMax);
       }
-      if (cleanedMessage && !streamedAudio) {
-        writeToTTS(cleanedMessage);
-      }
-      console.log(`[SarvamAgent] Response: "${cleanedMessage.slice(0, 150)}"`);
 
-      if (cleanedMessage) {
-        const { message, metadata } = this.extract(cleanedMessage);
+      if (spoken && !streamedAudio) {
+        stream.write(spoken);
+      }
+      console.log(`[SarvamAgent] Response: "${spoken.slice(0, 150)}"`);
+
+      if (fullMessage) {
+        const { message, metadata } = this.extract(fullMessage);
         this.addAssistantMessage(message, metadata);
       }
 
@@ -378,66 +252,72 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
   }
 }
 
-/**
- * When `reasoning_effort` is null, Sarvam can still fill `reasoning_content` and leave `content` null
- * until the budget ends — use a short tail that is often the spoken line.
- */
-function pickSpokenFallbackFromReasoning(reasoning: string): string {
-  const lines = reasoning
-    .split(/\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!;
-    if (line.startsWith("```")) continue;
-    if (/^\d+[\.\)]\s*\*\*/.test(line)) continue;
-    if (/^\*\*Analyze|^\*\*Brainstorm|^\*\*Deconstruct/i.test(line)) continue;
-    if (line.length >= 10 && line.length <= 600) return line;
-  }
-  const tail = reasoning.replace(/\s+/g, " ").trim().slice(-450);
-  return tail.length >= 8 ? tail : "";
+// ---------------------------------------------------------------------------
+// <speak> tag parser — deterministic, handles chunk boundaries
+// ---------------------------------------------------------------------------
+
+/** Extract spoken text from `<speak>...</speak>` in a complete string (non-stream). */
+function extractSpeak(raw: string): string {
+  if (!raw) return "";
+  const match = raw.match(/<speak>([\s\S]*?)<\/speak>/);
+  if (match) return match[1].trim();
+  // Fallback: if model forgot tags, treat the whole raw text minus known markers
+  // as spoken (graceful degradation, not silent failure).
+  console.warn("[SarvamAgent] No <speak> tags found — using full content as fallback");
+  return raw.replace(/\[SUGGEST:[^\]]*\]/g, "")
+    .replace(/\[SUBGOAL:\d+\]/g, "")
+    .replace(/\[SCENARIO_COMPLETE\]/g, "")
+    .replace(/\[SCENE:[^\]]*\]/g, "")
+    .trim();
 }
 
-/** Strip `[SCENARIO_COMPLETE]`-style markers and `(notes)` from text before TTS (single-shot). */
-function stripTtsControlMarkers(raw: string): string {
-  if (!raw) return "";
-  let out = "";
-  let insideBracket = false;
-  let bracketBuf = "";
-  const MAX_BRACKET_LEN = 320;
-  let insideParen = false;
-  let parenBuf = "";
-  const MAX_PAREN_LEN = 320;
-  for (const ch of raw) {
-    if (insideBracket) {
-      bracketBuf += ch;
-      if (ch === "]") {
-        insideBracket = false;
-        bracketBuf = "";
-      } else if (bracketBuf.length > MAX_BRACKET_LEN) {
-        insideBracket = false;
-        bracketBuf = "";
+/**
+ * Streaming state machine that emits only text inside `<speak>...</speak>`.
+ * Handles tags split across arbitrary chunk boundaries.
+ */
+class SpeakTagStreamParser {
+  private inside = false;
+  private tagBuf = "";
+
+  private static OPEN = "<speak>";
+  private static CLOSE = "</speak>";
+
+  feed(chunk: string): string {
+    let out = "";
+
+    for (const ch of chunk) {
+      this.tagBuf += ch;
+
+      if (!this.inside) {
+        // Looking for <speak>
+        if (SpeakTagStreamParser.OPEN.startsWith(this.tagBuf)) {
+          if (this.tagBuf === SpeakTagStreamParser.OPEN) {
+            this.inside = true;
+            this.tagBuf = "";
+          }
+          // else: partial match, keep buffering
+        } else {
+          // Not a tag match — discard (outside <speak>, we drop everything)
+          this.tagBuf = "";
+        }
+      } else {
+        // Inside <speak>, looking for </speak>
+        if (SpeakTagStreamParser.CLOSE.startsWith(this.tagBuf)) {
+          if (this.tagBuf === SpeakTagStreamParser.CLOSE) {
+            this.inside = false;
+            this.tagBuf = "";
+          }
+          // else: partial match of closing tag, keep buffering
+        } else {
+          // Not the start of </speak> — flush buffer as audible text
+          out += this.tagBuf;
+          this.tagBuf = "";
+        }
       }
-    } else if (insideParen) {
-      parenBuf += ch;
-      if (ch === ")") {
-        insideParen = false;
-        parenBuf = "";
-      } else if (parenBuf.length > MAX_PAREN_LEN) {
-        insideParen = false;
-        parenBuf = "";
-      }
-    } else if (ch === "[") {
-      insideBracket = true;
-      bracketBuf = "[";
-    } else if (ch === "(") {
-      insideParen = true;
-      parenBuf = "(";
-    } else {
-      out += ch;
     }
+
+    return out;
   }
-  return out;
 }
 
 function enforceFirstQuoteAboveTarget(

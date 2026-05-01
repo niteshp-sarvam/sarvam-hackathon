@@ -48,6 +48,8 @@ import { useMicdropState, useMicdropError, useSpeakerVolume, useMicVolume } from
 const CONTROL_MARKERS_RE =
   /\[(?:SCENARIO_COMPLETE|STARS:\d|SUBGOAL:\d+|SCENE:[^\]]*)\]/g;
 
+const SPEAK_TAGS_RE = /<\/?speak>/g;
+
 const FORMALITY_BASE_TEMP: Record<string, number> = {
   formal: 0.55,
   polite: 0.7,
@@ -60,12 +62,6 @@ const DIFFICULTY_TEMP_DELTA: Record<SessionDifficulty, number> = {
   hard: 0.05,
 };
 
-/** Sarvam hybrid reasoning consumes max_tokens before streaming assistant `content`; keep headroom. */
-const DIFFICULTY_MAX_TOKENS: Record<SessionDifficulty, number> = {
-  easy: 1024,
-  normal: 1536,
-  hard: 2048,
-};
 
 // Module-level helper so React's purity rule isn't tripped by Math.random()
 // being read inside the component body.
@@ -216,8 +212,6 @@ export default function ScenarioRoomPage({
     return Math.max(0.4, Math.min(1.0, base + delta));
   }, [room, difficulty]);
 
-  const sessionMaxTokens = DIFFICULTY_MAX_TOKENS[difficulty];
-
   const immersiveThemeStyle = useMemo(() => {
     if (resolvedMode === "light") {
       return {
@@ -266,7 +260,6 @@ export default function ScenarioRoomPage({
     wsUrl.searchParams.set("lang", `${lang.code}-IN`);
     wsUrl.searchParams.set("systemPrompt", systemPrompt);
     wsUrl.searchParams.set("temperature", sessionTemperature.toFixed(2));
-    wsUrl.searchParams.set("maxTokens", String(sessionMaxTokens));
     if (room.objective.kind === "max_total_price") {
       wsUrl.searchParams.set("firstTurnMinQuote", String(room.objective.openingQuoteRange[0]));
       wsUrl.searchParams.set("targetMax", String(room.objective.targetMax));
@@ -287,7 +280,7 @@ export default function ScenarioRoomPage({
         msg.includes("Permission") || msg.includes("NotAllowed") || msg.includes("Mic");
       setConnectionError(isMicError ? "mic" : "connection");
     }
-  }, [room, lang, difficulty, sessionSeed, sessionTemperature, sessionMaxTokens, VOICE_SERVER_URL]);
+  }, [room, lang, difficulty, sessionSeed, sessionTemperature, VOICE_SERVER_URL]);
 
   const stopVoiceSession = useCallback(async () => {
     await Micdrop.stop().catch(() => {});
@@ -307,7 +300,7 @@ export default function ScenarioRoomPage({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({
         role: m.role as "user" | "assistant",
-        content: "content" in m ? (m.content ?? "") : "",
+        content: ("content" in m ? (m.content ?? "") : "").replace(SPEAK_TAGS_RE, ""),
       }))
       .filter((m) => m.content.trim().length > 0);
 
@@ -338,7 +331,7 @@ export default function ScenarioRoomPage({
 
           const userUtterances = transcriptForJudge
             .filter((m) => m.role === "user")
-            .map((m) => m.content.replace(CONTROL_MARKERS_RE, "").trim())
+            .map((m) => m.content.replace(SPEAK_TAGS_RE, "").replace(CONTROL_MARKERS_RE, "").trim())
             .filter((t) => t.length > 0);
           let engCount = 0;
           for (const u of userUtterances) if (isEnglishLeaning(u)) engCount++;
@@ -430,7 +423,7 @@ export default function ScenarioRoomPage({
 
   // Strip ALL markers (incl. SUGGEST) from text used for replay/copy.
   const lastAssistantSpeakable = useMemo(() => {
-    return stripSuggestions(lastAssistantContent.replace(CONTROL_MARKERS_RE, "")).trim();
+    return stripSuggestions(lastAssistantContent.replace(SPEAK_TAGS_RE, "").replace(CONTROL_MARKERS_RE, "")).trim();
   }, [lastAssistantContent]);
 
   const [transcriptMessages, setTranscriptMessages] = useState<
@@ -450,7 +443,7 @@ export default function ScenarioRoomPage({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((msg) => {
         const rawContent = "content" in msg ? (msg.content ?? "") : "";
-        const cleaned = rawContent.replace(CONTROL_MARKERS_RE, "");
+        const cleaned = rawContent.replace(SPEAK_TAGS_RE, "").replace(CONTROL_MARKERS_RE, "");
         const content = stripSuggestions(cleaned).trim();
         const suggestions =
           msg.role === "assistant" ? parseSuggestions(cleaned) : undefined;

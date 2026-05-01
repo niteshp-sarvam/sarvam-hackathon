@@ -38,19 +38,40 @@ export class SarvamTTS extends TTS {
     this.isProcessing = true;
     let textBuffer = "";
 
+    const flushSentence = async (label: "sentence" | "chunk") => {
+      const toSend = textBuffer.trim();
+      if (toSend.length < 8) return;
+      textBuffer = "";
+      console.log(`[SarvamTTS] Sending ${label}: "${toSend.slice(0, 80)}"`);
+      await this.initPromise;
+      this.sendText(toSend);
+    };
+
     textStream.on("data", async (chunk: Buffer) => {
       if (this.canceled) return;
       const text = chunk.toString("utf-8");
       textBuffer += text;
+      const t = textBuffer.trim();
+      if (t.length < 8) return;
 
-      // Send at sentence boundaries to avoid tiny fragments the API rejects
+      // Sentence / line boundaries (Indic danda + Latin punctuation)
       const sentenceEnd = /[।.!?\n]$/;
-      if (sentenceEnd.test(textBuffer.trim()) && textBuffer.trim().length >= 10) {
-        const toSend = textBuffer.trim();
-        textBuffer = "";
-        console.log(`[SarvamTTS] Sending sentence: "${toSend.slice(0, 80)}"`);
-        await this.initPromise;
-        this.sendText(toSend);
+      if (sentenceEnd.test(t) && t.length >= 8) {
+        await flushSentence("sentence");
+        return;
+      }
+      // LLM streams long clauses without punctuation — cap buffer so TTS starts sooner
+      const MAX_BUFFER = 88;
+      if (t.length >= MAX_BUFFER) {
+        const cut = t.lastIndexOf(" ", MAX_BUFFER);
+        const splitAt = cut > 24 ? cut : MAX_BUFFER;
+        const toSend = t.slice(0, splitAt).trim();
+        textBuffer = t.slice(splitAt).trimStart();
+        if (toSend.length >= 8) {
+          console.log(`[SarvamTTS] Sending chunk: "${toSend.slice(0, 80)}"`);
+          await this.initPromise;
+          this.sendText(toSend);
+        }
       }
     });
 

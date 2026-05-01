@@ -2,34 +2,34 @@
  * Standalone WebSocket voice server using Micdrop.
  * Runs alongside Next.js on port 8081.
  *
- * Usage:  npx tsx voice-server.ts
- *
- * Per-session knobs (URL query string):
- *   roomId        — scenario room id (logging only)
- *   lang          — BCP-47 language tag, e.g. hi-IN, ta-IN
- *   systemPrompt  — full system prompt assembled by the client
- *   temperature   — float, defaults to 0.7
- *   maxTokens     — int, defaults high enough for Sarvam hybrid reasoning + reply
- *   llmStream     — set to "0" to use one blocking non-stream completion (slower TTFA, more reliable if streaming fails)
+ * STT + TTS always use Sarvam. LLM uses Groq (Llama) for scenario rooms
+ * when GROQ_API_KEY is set, otherwise falls back to Sarvam.
  */
 
 import { MicdropServer } from "@micdrop/server";
 import { WebSocketServer } from "ws";
 import { SarvamSTT } from "./src/lib/voice/sarvam-stt";
 import { SarvamTTS } from "./src/lib/voice/sarvam-tts";
-import { SarvamAgent } from "./src/lib/voice/sarvam-agent";
+import { SarvamAgent, type LlmConfig } from "./src/lib/voice/sarvam-agent";
 import * as dotenv from "dotenv";
 
 dotenv.config();
 
-// Support both local runs (VOICE_SERVER_PORT) and PaaS defaults (PORT).
 const PORT = parseInt(process.env.VOICE_SERVER_PORT ?? process.env.PORT ?? "8081", 10);
-const API_KEY = process.env.SARVAM_API_KEY;
+const SARVAM_KEY = process.env.SARVAM_API_KEY;
+const GROQ_KEY = process.env.GROQ_API_KEY;
 
-if (!API_KEY) {
+if (!SARVAM_KEY) {
   console.error("SARVAM_API_KEY is not set in .env");
   process.exit(1);
 }
+
+const GROQ_LLM: LlmConfig | undefined = GROQ_KEY
+  ? { apiBase: "https://api.groq.com/openai", apiKey: GROQ_KEY, model: "llama-3.3-70b-versatile", authStyle: "bearer" }
+  : undefined;
+
+if (GROQ_LLM) console.log("[voice-server] Groq LLM enabled (llama-3.3-70b-versatile)");
+else console.log("[voice-server] Groq not configured, using Sarvam LLM");
 
 const wss = new WebSocketServer({ port: PORT });
 
@@ -47,7 +47,6 @@ wss.on("connection", (socket, req) => {
   const systemPrompt = url.searchParams.get("systemPrompt") ?? "";
 
   const tempStr = url.searchParams.get("temperature");
-  const maxTokStr = url.searchParams.get("maxTokens");
   const firstTurnMinQuoteStr = url.searchParams.get("firstTurnMinQuote");
   const targetMaxStr = url.searchParams.get("targetMax");
   const llmStreamRaw = url.searchParams.get("llmStream");
@@ -59,11 +58,6 @@ wss.on("connection", (socket, req) => {
     tempStr !== null && !Number.isNaN(parseFloat(tempStr))
       ? Math.max(0, Math.min(1.5, parseFloat(tempStr)))
       : undefined;
-  // Sarvam streams reasoning into reasoning_content first; short budgets yield zero delta.content.
-  const maxTokens =
-    maxTokStr !== null && !Number.isNaN(parseInt(maxTokStr, 10))
-      ? Math.max(256, Math.min(4096, parseInt(maxTokStr, 10)))
-      : undefined;
   const firstTurnMinQuote =
     firstTurnMinQuoteStr !== null && !Number.isNaN(parseInt(firstTurnMinQuoteStr, 10))
       ? Math.max(1, parseInt(firstTurnMinQuoteStr, 10))
@@ -73,32 +67,34 @@ wss.on("connection", (socket, req) => {
       ? Math.max(1, parseInt(targetMaxStr, 10))
       : undefined;
 
+  const llmConfig = GROQ_LLM ?? undefined;
+
   console.log(
-    `[voice-server] New connection: room=${roomId}, lang=${langCode}, temp=${temperature ?? "default"}, maxTokens=${maxTokens ?? "default"}, llmStream=${llmStream}, firstTurnMinQuote=${firstTurnMinQuote ?? "none"}, targetMax=${targetMax ?? "none"}`
+    `[voice-server] New connection: room=${roomId}, lang=${langCode}, llm=${llmConfig ? "groq" : "sarvam"}, temp=${temperature ?? "default"}, llmStream=${llmStream}`
   );
 
   const stt = new SarvamSTT({
-    apiKey: API_KEY,
+    apiKey: SARVAM_KEY,
     languageCode: langCode,
   });
 
   const tts = new SarvamTTS({
-    apiKey: API_KEY,
+    apiKey: SARVAM_KEY,
     languageCode: langCode,
   });
 
   const agent = new SarvamAgent({
-    apiKey: API_KEY,
+    apiKey: SARVAM_KEY,
     systemPrompt:
       systemPrompt ||
       `You are a helpful language learning assistant. Speak in the learner's target language.`,
     temperature,
-    maxTokens,
     firstTurnMinQuote,
     targetMax,
     autoEndCall: true,
     autoIgnoreUserNoise: true,
     llmStream,
+    llm: llmConfig,
   });
 
   stt.on("Transcript", (text: string) => {
