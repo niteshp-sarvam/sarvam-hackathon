@@ -16,8 +16,10 @@ function json(data: any): string {
 }
 
 export const sync = {
+  /** 401: JWT user id not found in DB (e.g. after reset). Client should sign out. */
   async fetchState() {
     const res = await api("/api/user/state");
+    if (res.status === 401) return "stale_session" as const;
     if (!res.ok) return null;
     return res.json();
   },

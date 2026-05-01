@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
-import { getAuthUserId, unauthorized } from "@/lib/api-auth";
+import { getSessionUserOrNull, unauthorized, sessionInvalid } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const userId = await getAuthUserId();
+  const { userId, user: dbUser } = await getSessionUserOrNull();
   if (!userId) return unauthorized();
+  if (!dbUser) return sessionInvalid();
+
+  const user = { name: dbUser.name, email: dbUser.email };
 
   const [
-    user,
     profile,
     gardenCards,
     scenarioResults,
@@ -17,7 +19,6 @@ export async function GET() {
     foundationMilestones,
     unlockedMilestones,
   ] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
     prisma.userProfile.findUnique({ where: { userId } }),
     prisma.gardenCard.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     prisma.scenarioResult.findMany({ where: { userId } }),

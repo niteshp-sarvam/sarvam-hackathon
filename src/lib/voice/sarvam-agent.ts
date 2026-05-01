@@ -8,15 +8,20 @@ export interface SarvamAgentOptions extends AgentOptions {
   maxTokens?: number;
   firstTurnMinQuote?: number;
   targetMax?: number;
+  /**
+   * When true (default), streams tokens to TTS as they arrive — lowest time-to-first-audio.
+   * Set false (voice server: `?llmStream=0`) for a single non-stream completion (slower but avoids empty `delta.content`).
+   */
+  llmStream?: boolean;
 }
 
 const SARVAM_API_BASE = "https://api.sarvam.ai";
 const DEFAULT_MODEL = "sarvam-105b";
 
 /**
- * Sarvam AI chat completion agent with streaming support.
- * Streams tokens via SSE from /v1/chat/completions, writes to a PassThrough
- * stream that Micdrop pipes into TTS.
+ * Sarvam AI chat completion for Micdrop → TTS.
+ * Default: SSE streaming with `reasoning_effort: null` for fast time-to-first-audio.
+ * Set `llmStream: false` for non-streaming (waits for full `message.content` first).
  */
 export class SarvamAgent extends Agent<SarvamAgentOptions> {
   private abortController?: AbortController;
@@ -25,10 +30,78 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
     super(options);
   }
 
+  /** Non-stream completion; `generous` uses a larger token budget for retries after a failed stream. */
+  private async fetchNonStreamCompletion(
+    messages: { role: string; content: string }[],
+    signal: AbortSignal,
+    opts?: { generous?: boolean }
+  ): Promise<string> {
+    const base = this.options.maxTokens ?? 1024;
+    const maxTok = opts?.generous
+      ? Math.min(8192, Math.max(4096, Math.floor(base * 3)))
+      : Math.min(8192, Math.max(2048, Math.floor(base * 2)));
+    const res = await fetch(`${SARVAM_API_BASE}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-subscription-key": this.options.apiKey,
+      },
+      body: JSON.stringify({
+        model: this.options.model ?? DEFAULT_MODEL,
+        messages,
+        temperature: this.options.temperature ?? 0.7,
+        max_tokens: maxTok,
+        reasoning_effort: null,
+        stream: false,
+      }),
+      signal,
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.warn(
+        "[SarvamAgent] Non-stream request failed:",
+        res.status,
+        errBody.slice(0, 240)
+      );
+      return "";
+    }
+    const json = (await res.json()) as {
+      choices?: Array<{
+        finish_reason?: string;
+        message?: {
+          content?: string | null;
+          reasoning_content?: string | null;
+        };
+      }>;
+    };
+    const ch = json.choices?.[0];
+    const msg = ch?.message;
+    const content = (msg?.content ?? "").trim();
+    if (content) return content;
+    const reasoning = (msg?.reasoning_content ?? "").trim();
+    if (reasoning) {
+      const spoken = pickSpokenFallbackFromReasoning(reasoning);
+      if (spoken) {
+        console.warn(
+          "[SarvamAgent] message.content empty; using reasoning tail for speech (finish:",
+          ch?.finish_reason ?? "?",
+          ")"
+        );
+        return spoken;
+      }
+    }
+    if (ch) {
+      console.warn("[SarvamAgent] Empty choice (no content / no usable reasoning)", ch.finish_reason);
+    }
+    return "";
+  }
+
   protected async generateAnswer(stream: PassThrough): Promise<void> {
     console.log("[SarvamAgent] generateAnswer called, conversation length:", this.conversation.length);
-    const abortController = new AbortController();
-    this.abortController = abortController;
+    const prev = this.abortController;
+    this.abortController = new AbortController();
+    const abortController = this.abortController;
+    prev?.abort();
 
     try {
       const raw = this.conversation.map((m) => {
@@ -60,6 +133,44 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
 
       console.log("[SarvamAgent] Sending messages:", JSON.stringify(messages.map(m => ({ role: m.role, content: m.content.slice(0, 60) }))));
 
+      const useLlmStream = this.options.llmStream !== false;
+      if (!useLlmStream) {
+        let fullMessage = await this.fetchNonStreamCompletion(
+          messages,
+          abortController.signal
+        );
+        if (!fullMessage.trim() && abortController === this.abortController) {
+          console.warn("[SarvamAgent] Empty non-stream reply — retry with larger token budget");
+          fullMessage = await this.fetchNonStreamCompletion(messages, abortController.signal, {
+            generous: true,
+          });
+        }
+        let cleanedMessage = fullMessage
+          .replace(/<think>[\s\S]*?<\/redacted_thinking>/g, "")
+          .trim();
+        if (
+          shouldGuardFirstPrice &&
+          typeof this.options.firstTurnMinQuote === "number" &&
+          typeof this.options.targetMax === "number"
+        ) {
+          cleanedMessage = enforceFirstQuoteAboveTarget(
+            cleanedMessage,
+            this.options.firstTurnMinQuote,
+            this.options.targetMax
+          );
+        }
+        const forTts = stripTtsControlMarkers(cleanedMessage);
+        if (forTts) stream.write(forTts);
+        console.log(`[SarvamAgent] Response (non-stream): "${cleanedMessage.slice(0, 150)}"`);
+        if (cleanedMessage) {
+          const { message, metadata } = this.extract(cleanedMessage);
+          this.addAssistantMessage(message, metadata);
+        }
+        stream.end();
+        this.abortController = undefined;
+        return;
+      }
+
       const res = await fetch(`${SARVAM_API_BASE}/v1/chat/completions`, {
         method: "POST",
         headers: {
@@ -72,7 +183,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
           // Lowered defaults: scenarios want tight, alive 1-3 sentence replies.
           // Old defaults (0.7 / 1024) encouraged the model to monologue.
           temperature: this.options.temperature ?? 0.7,
-          max_tokens: this.options.maxTokens ?? 220,
+          max_tokens: this.options.maxTokens ?? 1024,
           reasoning_effort: null,
           stream: true,
         }),
@@ -102,6 +213,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
       let insideParen = false;
       let parenBuf = "";
       const MAX_PAREN_LEN = 320;
+      let streamedAudio = false;
 
       const writeToTTS = (raw: string) => {
         if (!raw) return;
@@ -137,7 +249,10 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
             out += ch;
           }
         }
-        if (out) stream.write(out);
+        if (out) {
+          stream.write(out);
+          streamedAudio = true;
+        }
       };
 
       while (true) {
@@ -201,7 +316,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
           if (content) {
             fullMessage = content;
             const cleaned = content
-              .replace(/<think>[\s\S]*?<\/think>/g, "")
+              .replace(/<think>[\s\S]*?<\/redacted_thinking>/g, "")
               .trim();
             if (cleaned && !shouldGuardFirstPrice) writeToTTS(cleaned);
           }
@@ -210,8 +325,20 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
         }
       }
 
-      // Strip think blocks for conversation storage
-      let cleanedMessage = fullMessage.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      if (!fullMessage.trim() && abortController === this.abortController) {
+        console.warn(
+          "[SarvamAgent] Empty stream content — non-stream fallback (reasoning may have used the token budget)"
+        );
+        const fb = await this.fetchNonStreamCompletion(messages, abortController.signal, {
+          generous: true,
+        });
+        if (fb) fullMessage = fb;
+      }
+
+      // Strip think / reasoning wrapper blocks for conversation + TTS
+      let cleanedMessage = fullMessage
+        .replace(/<think>[\s\S]*?<\/redacted_thinking>/g, "")
+        .trim();
       if (
         shouldGuardFirstPrice &&
         typeof this.options.firstTurnMinQuote === "number" &&
@@ -223,7 +350,7 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
           this.options.targetMax
         );
       }
-      if (shouldGuardFirstPrice && cleanedMessage) {
+      if (cleanedMessage && !streamedAudio) {
         writeToTTS(cleanedMessage);
       }
       console.log(`[SarvamAgent] Response: "${cleanedMessage.slice(0, 150)}"`);
@@ -249,6 +376,68 @@ export class SarvamAgent extends Agent<SarvamAgentOptions> {
     this.abortController.abort();
     this.abortController = undefined;
   }
+}
+
+/**
+ * When `reasoning_effort` is null, Sarvam can still fill `reasoning_content` and leave `content` null
+ * until the budget ends — use a short tail that is often the spoken line.
+ */
+function pickSpokenFallbackFromReasoning(reasoning: string): string {
+  const lines = reasoning
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (line.startsWith("```")) continue;
+    if (/^\d+[\.\)]\s*\*\*/.test(line)) continue;
+    if (/^\*\*Analyze|^\*\*Brainstorm|^\*\*Deconstruct/i.test(line)) continue;
+    if (line.length >= 10 && line.length <= 600) return line;
+  }
+  const tail = reasoning.replace(/\s+/g, " ").trim().slice(-450);
+  return tail.length >= 8 ? tail : "";
+}
+
+/** Strip `[SCENARIO_COMPLETE]`-style markers and `(notes)` from text before TTS (single-shot). */
+function stripTtsControlMarkers(raw: string): string {
+  if (!raw) return "";
+  let out = "";
+  let insideBracket = false;
+  let bracketBuf = "";
+  const MAX_BRACKET_LEN = 320;
+  let insideParen = false;
+  let parenBuf = "";
+  const MAX_PAREN_LEN = 320;
+  for (const ch of raw) {
+    if (insideBracket) {
+      bracketBuf += ch;
+      if (ch === "]") {
+        insideBracket = false;
+        bracketBuf = "";
+      } else if (bracketBuf.length > MAX_BRACKET_LEN) {
+        insideBracket = false;
+        bracketBuf = "";
+      }
+    } else if (insideParen) {
+      parenBuf += ch;
+      if (ch === ")") {
+        insideParen = false;
+        parenBuf = "";
+      } else if (parenBuf.length > MAX_PAREN_LEN) {
+        insideParen = false;
+        parenBuf = "";
+      }
+    } else if (ch === "[") {
+      insideBracket = true;
+      bracketBuf = "[";
+    } else if (ch === "(") {
+      insideParen = true;
+      parenBuf = "(";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
 }
 
 function enforceFirstQuoteAboveTarget(

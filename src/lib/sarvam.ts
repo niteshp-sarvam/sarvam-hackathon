@@ -44,6 +44,7 @@ export async function chatCompletion(
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.max_tokens ?? 1024,
+      reasoning_effort: null,
     }),
   });
   if (!res.ok) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { signOut } from "next-auth/react";
 import { type LanguageCode, IDENTITY_LEVELS } from "./constants";
 import type { CurriculumLessonId } from "./foundation-path";
 import { mergeMilestoneDates } from "./foundation-path";
@@ -103,6 +104,11 @@ export const useAppStore = create<AppState>()(
     hydrateFromServer: async () => {
       try {
         const data = await sync.fetchState();
+        if (data === "stale_session") {
+          await signOut({ callbackUrl: "/login" });
+          set({ isHydrated: true });
+          return;
+        }
         if (!data) {
           set({ isHydrated: true });
           return;

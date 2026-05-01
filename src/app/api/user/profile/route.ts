@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
-import { getAuthUserId, unauthorized } from "@/lib/api-auth";
+import { getSessionUserOrNull, sessionInvalid, unauthorized } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody } from "@/lib/schemas/parse";
 import { userProfileUpdateSchema } from "@/lib/schemas/user";
 
 export async function GET() {
-  const userId = await getAuthUserId();
+  const { userId, user } = await getSessionUserOrNull();
   if (!userId) return unauthorized();
+  if (!user) return sessionInvalid();
 
   const profile = await prisma.userProfile.findUnique({ where: { userId } });
   return NextResponse.json(profile);
 }
 
 export async function PUT(req: Request) {
-  const userId = await getAuthUserId();
+  const { userId, user } = await getSessionUserOrNull();
   if (!userId) return unauthorized();
+  if (!user) return sessionInvalid();
 
   const parsed = await parseJsonBody(req, userProfileUpdateSchema);
   if (!parsed.success) return parsed.response;

@@ -60,10 +60,11 @@ const DIFFICULTY_TEMP_DELTA: Record<SessionDifficulty, number> = {
   hard: 0.05,
 };
 
+/** Sarvam hybrid reasoning consumes max_tokens before streaming assistant `content`; keep headroom. */
 const DIFFICULTY_MAX_TOKENS: Record<SessionDifficulty, number> = {
-  easy: 140,
-  normal: 200,
-  hard: 260,
+  easy: 1024,
+  normal: 1536,
+  hard: 2048,
 };
 
 // Module-level helper so React's purity rule isn't tripped by Math.random()
@@ -111,7 +112,34 @@ export default function ScenarioRoomPage({
   >([]);
 
   const micdropState = useMicdropState();
-  useMicdropError((err) => console.error("[Micdrop]", err.message));
+  useMicdropError((err) => {
+    const e = err as { name?: string; message?: string; code?: string };
+    const text = [e.name, e.message, e.code].filter(Boolean).join(" ").trim();
+    if (!micdropErrorHandledRef.current) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[Micdrop]", e.code || text || "error", err);
+      } else {
+        console.error("[Micdrop]", e.code || text || "error");
+      }
+    }
+    if (micdropErrorHandledRef.current) return;
+    const isMic =
+      e.code === "NotAllowed" || /Permission|NotAllowed|NotFoundError|device/i.test(text);
+    const isConnection =
+      e.code === "Connection" ||
+      /Connection|ECONNREFUSED|WebSocket|refused|closed|network/i.test(text);
+    if (isMic) {
+      micdropErrorHandledRef.current = true;
+      setConnectionError("mic");
+      voiceStartedRef.current = false;
+      void Micdrop.stop().catch(() => {});
+    } else if (isConnection) {
+      micdropErrorHandledRef.current = true;
+      setConnectionError("connection");
+      voiceStartedRef.current = false;
+      void Micdrop.stop().catch(() => {});
+    }
+  });
   const { speakerVolume, maxSpeakerVolume } = useSpeakerVolume();
   const { micVolume, maxMicVolume } = useMicVolume();
 
@@ -144,6 +172,8 @@ export default function ScenarioRoomPage({
   const startingRef = useRef(false);
   const judgingFiredRef = useRef(false);
   const replayAudioRef = useRef<HTMLAudioElement | null>(null);
+  /** One Micdrop error per session — avoids console spam on WS retry loops. */
+  const micdropErrorHandledRef = useRef(false);
 
   const plantStruggleWords = useCallback(
     (words: JudgeStruggleWord[]) => {
@@ -221,6 +251,7 @@ export default function ScenarioRoomPage({
   const startVoiceSession = useCallback(async () => {
     if (!room || !lang) return;
     setConnectionError(false);
+    micdropErrorHandledRef.current = false;
     judgingFiredRef.current = false;
     const systemPrompt = buildSystemPrompt({
       room: room as ScenarioRoomLike,
@@ -250,6 +281,7 @@ export default function ScenarioRoomPage({
       });
     } catch (err) {
       console.error("[VoiceSession] Failed to start:", err);
+      micdropErrorHandledRef.current = true;
       const msg = String(err);
       const isMicError =
         msg.includes("Permission") || msg.includes("NotAllowed") || msg.includes("Mic");
@@ -345,6 +377,7 @@ export default function ScenarioRoomPage({
 
   const retryConnection = useCallback(() => {
     setConnectionError(false);
+    micdropErrorHandledRef.current = false;
     setIsMicMuted(false);
     voiceStartedRef.current = false;
     setRestartKey((k) => k + 1);
@@ -362,6 +395,7 @@ export default function ScenarioRoomPage({
       setIsJudging(false);
       setTranscriptCopied(false);
       setIsMicMuted(false);
+      micdropErrorHandledRef.current = false;
       setPlantedWords([]);
       setSessionSeed(randomSessionSeed());
       if (nextDifficulty) setDifficulty(nextDifficulty);
@@ -708,7 +742,7 @@ export default function ScenarioRoomPage({
               >
                 {connectionError === "mic"
                   ? "This scenario needs your microphone. Click the lock icon in your browser's address bar, allow microphone access, then retry."
-                  : "Make sure the voice server is running and try again."}
+                  : "The voice WebSocket could not open. In development, run npm run voice in a separate terminal (default ws://localhost:8081) and set NEXT_PUBLIC_VOICE_SERVER_URL if you use another host or port, then tap Retry."}
               </Text>
             </FadeIn>
             <FadeIn delay={0.4}>

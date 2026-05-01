@@ -49,6 +49,10 @@ export class SarvamSTT extends STT {
 
   transcribe(audioStream: Readable) {
     if (this.isDestroyed) return;
+    if (this.activeTurn) {
+      this.activeTurn.close();
+      this.activeTurn = undefined;
+    }
     const turnId = ++this.turnCounter;
     const tag = `[SarvamSTT][t${turnId}]`;
 
@@ -85,6 +89,14 @@ export class SarvamSTT extends STT {
         return;
       }
       this.emit("Transcript", text);
+    };
+
+    /** New mic audio started while this turn was still open — avoid overlapping sockets / timeouts. */
+    const abandonTurn = () => {
+      if (resolved) return;
+      console.log(`${tag} Turn superseded — closing STT socket`);
+      resolved = true;
+      cleanup();
     };
 
     const sendChunk = (chunk: Buffer) => {
@@ -164,7 +176,7 @@ export class SarvamSTT extends STT {
       },
     });
 
-    this.activeTurn = { close: cleanup };
+    this.activeTurn = { close: abandonTurn };
 
     // Adopting a pre-warmed socket: it might already be OPEN, in which case we
     // also need to fire the open path now, since `bind()` only registers

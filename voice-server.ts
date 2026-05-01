@@ -9,7 +9,8 @@
  *   lang          — BCP-47 language tag, e.g. hi-IN, ta-IN
  *   systemPrompt  — full system prompt assembled by the client
  *   temperature   — float, defaults to 0.7
- *   maxTokens     — int, defaults to 220
+ *   maxTokens     — int, defaults high enough for Sarvam hybrid reasoning + reply
+ *   llmStream     — set to "0" to use one blocking non-stream completion (slower TTFA, more reliable if streaming fails)
  */
 
 import { MicdropServer } from "@micdrop/server";
@@ -49,13 +50,19 @@ wss.on("connection", (socket, req) => {
   const maxTokStr = url.searchParams.get("maxTokens");
   const firstTurnMinQuoteStr = url.searchParams.get("firstTurnMinQuote");
   const targetMaxStr = url.searchParams.get("targetMax");
+  const llmStreamRaw = url.searchParams.get("llmStream");
+  const llmStream =
+    llmStreamRaw === null || llmStreamRaw === ""
+      ? true
+      : llmStreamRaw !== "0" && llmStreamRaw.toLowerCase() !== "false";
   const temperature =
     tempStr !== null && !Number.isNaN(parseFloat(tempStr))
       ? Math.max(0, Math.min(1.5, parseFloat(tempStr)))
       : undefined;
+  // Sarvam streams reasoning into reasoning_content first; short budgets yield zero delta.content.
   const maxTokens =
     maxTokStr !== null && !Number.isNaN(parseInt(maxTokStr, 10))
-      ? Math.max(40, Math.min(512, parseInt(maxTokStr, 10)))
+      ? Math.max(256, Math.min(4096, parseInt(maxTokStr, 10)))
       : undefined;
   const firstTurnMinQuote =
     firstTurnMinQuoteStr !== null && !Number.isNaN(parseInt(firstTurnMinQuoteStr, 10))
@@ -67,7 +74,7 @@ wss.on("connection", (socket, req) => {
       : undefined;
 
   console.log(
-    `[voice-server] New connection: room=${roomId}, lang=${langCode}, temp=${temperature ?? "default"}, maxTokens=${maxTokens ?? "default"}, firstTurnMinQuote=${firstTurnMinQuote ?? "none"}, targetMax=${targetMax ?? "none"}`
+    `[voice-server] New connection: room=${roomId}, lang=${langCode}, temp=${temperature ?? "default"}, maxTokens=${maxTokens ?? "default"}, llmStream=${llmStream}, firstTurnMinQuote=${firstTurnMinQuote ?? "none"}, targetMax=${targetMax ?? "none"}`
   );
 
   const stt = new SarvamSTT({
@@ -91,6 +98,7 @@ wss.on("connection", (socket, req) => {
     targetMax,
     autoEndCall: true,
     autoIgnoreUserNoise: true,
+    llmStream,
   });
 
   stt.on("Transcript", (text: string) => {
